@@ -33,10 +33,19 @@ on conflict (id) do update
 -- ---------------------------------------------------------------------------
 -- Product 1 — SSG Herbal Shikakai Powder
 -- ---------------------------------------------------------------------------
--- Ingredients are transcribed verbatim from brief §27. Nothing is added.
--- No benefits are listed: the brief supplies an ingredient list for this
--- product but no claims, and inventing benefit copy is exactly what §31 and
--- §74 forbid. The admin can add verified copy later without a code change.
+-- Ingredients are transcribed from the official SSG ingredients artwork, which
+-- lists all 17 in this order.
+--
+-- One deliberate difference from brief §27: the brief writes "Kaarbogar
+-- arisi", the packaging artwork writes "Kaarboga arisi". The packaging is the
+-- customer-facing source of truth for a product's own ingredient list, so the
+-- packaging spelling is used here. If the brief spelling is the correct one,
+-- change it in the admin panel — it needs no code change.
+--
+-- `benefits` carries only the two statements that actually appear on the
+-- pouch: the "100% NATURAL" badge and the "HOMEMADE POWDER" descriptor. No
+-- hair-growth, hair-fall or dandruff claim appears on this packaging, so none
+-- is written here (§31, §74).
 
 insert into products (
   name, slug, short_description, ingredients, benefits, is_active, is_featured, sort_order
@@ -44,24 +53,29 @@ insert into products (
 values (
   'SSG Herbal Shikakai Powder',
   'herbal-shikakai-powder',
-  null,
+  '100% Natural · Homemade herbal powder blended from 17 traditional ingredients',
   array[
     'Shikakai', 'Tulasi', 'Soap nuts', 'Sembaruthi leaves, flowers',
     'Karisalankanni', 'Amla', 'Avarampoo', 'Neem leaf', 'Green gram',
-    'Kaarbogar arisi', 'Fenugreek', 'Vasambu', 'Rose', 'Vettiver',
+    'Kaarboga arisi', 'Fenugreek', 'Vasambu', 'Rose', 'Vettiver',
     'Curry leaves', 'Lemon & Orange peel', 'Other herbs'
   ],
-  array[]::text[],
+  array[
+    '100% Natural',
+    'Homemade Powder'
+  ],
   true,
   true,
   1
 )
 on conflict (slug) do update
-  set name        = excluded.name,
-      ingredients = excluded.ingredients,
-      is_active   = excluded.is_active,
-      is_featured = excluded.is_featured,
-      sort_order  = excluded.sort_order;
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
 
 -- Variants. Prices are in paise: ₹199 is 19900.
 --   200g  MRP ₹240  ->  ₹199   (17% off, computed at read time)

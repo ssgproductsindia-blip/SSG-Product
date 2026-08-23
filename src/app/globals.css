@@ -1,26 +1,223 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/* ==========================================================================
+   SSG Products — design tokens
+   --------------------------------------------------------------------------
+   Every colour here is sampled from the actual SSG brand material, not chosen
+   freely:
+
+     green    the logo's tree canopy and the mint label background
+     earth    the logo's exposed roots, the product-name type, the kraft pouch
+     gold     the fenugreek seeds in the ingredient photography
+     cream    the ingredient poster's peach-cream ground
+     stone    a warm neutral mixed toward brown rather than blue, so greys sit
+              with the kraft packaging instead of looking cold beside it
+
+   Contrast, measured against the surfaces these are actually used on:
+
+     green-700 #3D7A2F on white ......  5.2:1  passes AA for body text
+     green-600 #4A9B3C on white ......  3.5:1  FAILS body text; UI/large only
+     earth-800 #4E3220 on cream ...... 11.4:1  passes AAA
+     stone-500 #7A6A5A on cream ......  4.6:1  passes AA for body text
+
+   That is why --color-brand, used for text and buttons, is green-700 and not
+   the brighter green-600 that matches the logo most literally. The logo green
+   stays for large display type, icons and borders, where 3:1 is the bar.
+
+   No dark mode. The brand is cream, kraft and leaf green; inverting it to
+   near-black would be a different brand wearing the same logo. The palette
+   commits to light and paints its background explicitly.
+   ========================================================================== */
+
+@theme {
+  /* --- Green: logo canopy, label background ----------------------------- */
+  --color-green-50: #f1f7ee;
+  --color-green-100: #dcebd6;
+  --color-green-200: #c5dcc0;
+  --color-green-300: #a5d796;
+  --color-green-400: #7fc46b;
+  --color-green-500: #5cb247;
+  --color-green-600: #4a9b3c;
+  --color-green-700: #3d7a2f;
+  --color-green-800: #2e5c24;
+  --color-green-900: #1f3d18;
+
+  /* --- Earth: roots, product name, kraft pouch --------------------------- */
+  --color-earth-50: #faf3e8;
+  --color-earth-100: #efdfc8;
+  --color-earth-200: #debf98;
+  --color-earth-300: #c89a6a;
+  --color-earth-400: #a8834f;
+  --color-earth-500: #8a6240;
+  --color-earth-600: #6b4a2f;
+  --color-earth-700: #5c3a21;
+  --color-earth-800: #4e3220;
+  --color-earth-900: #3a2414;
+
+  /* --- Gold: fenugreek --------------------------------------------------- */
+  --color-gold-300: #ecd08a;
+  --color-gold-400: #e3b84a;
+  --color-gold-500: #d4a017;
+  --color-gold-600: #b8860b;
+
+  /* --- Warm neutrals ----------------------------------------------------- */
+  --color-cream: #fcf7ef;
+  --color-cream-deep: #f7ede0;
+  --color-stone-50: #faf8f5;
+  --color-stone-100: #f0ebe4;
+  --color-stone-200: #e2dad0;
+  --color-stone-300: #cdc2b4;
+  --color-stone-400: #a2937f;
+  --color-stone-500: #7a6a5a;
+  --color-stone-600: #5c4f42;
+  --color-stone-700: #443a30;
+  --color-stone-900: #2a231c;
+
+  /* --- Semantic roles ---------------------------------------------------- */
+  --color-brand: var(--color-green-700);
+  --color-brand-strong: var(--color-green-800);
+  --color-brand-bright: var(--color-green-600);
+  --color-accent: var(--color-gold-500);
+
+  --color-surface: #ffffff;
+  --color-surface-warm: var(--color-cream);
+  --color-surface-sunk: var(--color-stone-100);
+
+  --color-ink: var(--color-stone-900);
+  --color-ink-muted: var(--color-stone-500);
+  --color-line: var(--color-stone-200);
+
+  --color-danger: #a8341f;
+  --color-danger-surface: #fdf1ee;
+  --color-success: var(--color-green-700);
+  --color-success-surface: var(--color-green-50);
+  --color-warning: #8a5a00;
+  --color-warning-surface: #fdf6e3;
+
+  /* --- Type -------------------------------------------------------------- */
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), Georgia, 'Times New Roman', serif;
+
+  /* --- Motion ------------------------------------------------------------ */
+  /* One easing for everything, so the whole site moves with one character. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-surface-warm);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Visible, high-contrast focus ring on every interactive element.
+   Keyboard users are not a fallback audience — this is deliberately loud. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-green-700);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Drop the ring for pointer users only, never for keyboard. */
+:where(a, button):focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background-color: var(--color-green-200);
+  color: var(--color-green-900);
+}
+
+/* ==========================================================================
+   Motion
+   --------------------------------------------------------------------------
+   Scroll reveals are opacity + transform only — both compositor properties,
+   so they never trigger layout. The `data-reveal` attribute is set by the
+   Reveal component. Note the hidden state exists ONLY inside the
+   no-preference query: if JavaScript never runs, or the user asked for
+   reduced motion, content is plainly visible rather than stuck at opacity 0.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal='hidden'] {
+    opacity: 0;
+    transform: translate3d(0, 1.25rem, 0);
+  }
+
+  [data-reveal='shown'] {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    transition:
+      opacity 0.6s var(--ease-out-soft),
+      transform 0.6s var(--ease-out-soft);
+  }
+}
+
+/* A user who asks for reduced motion gets the finished layout instantly —
+   not a degraded page, just one that does not animate into place. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
+
+/* Skip link: off-screen until focused, then pinned top-left. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--color-green-800);
+  color: #ffffff;
+  border-radius: 0.5rem;
+}
+
+/* Struck-through MRP. A real line-through renders inconsistently across fonts
+   at small sizes; this keeps it centred and the same weight everywhere. */
+.price-struck {
+  position: relative;
+  text-decoration: none;
+}
+
+.price-struck::after {
+  content: '';
+  position: absolute;
+  left: -0.05em;
+  right: -0.05em;
+  top: 50%;
+  height: 1px;
+  background-color: currentColor;
+  opacity: 0.7;
 }
