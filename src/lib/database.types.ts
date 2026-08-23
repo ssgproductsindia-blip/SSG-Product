@@ -285,6 +285,21 @@ export type Database = {
         Args: { p_order_number: string; p_contact: string };
         Returns: unknown;
       };
+      create_order: {
+        Args: {
+          p_customer: { name: string; email: string; phone: string };
+          p_shipping: {
+            address: string;
+            city: string;
+            state: string;
+            postal_code: string;
+            country: string;
+          };
+          p_items: { variant_id: string; quantity: number }[];
+          p_notes: string | null;
+        };
+        Returns: unknown;
+      };
       is_admin: { Args: Record<never, never>; Returns: boolean };
     };
     Enums: {
