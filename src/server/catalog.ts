@@ -46,6 +46,8 @@ export type CatalogProduct = {
   ingredients: string[];
   benefits: string[];
   usageInstructions: string | null;
+  /** Label facts as a key/value map — shelf life, directions, and so on. */
+  specifications: Record<string, string>;
   seoTitle: string | null;
   seoDescription: string | null;
   isFeatured: boolean;
@@ -72,6 +74,7 @@ type RawProduct = {
   ingredients: string[];
   benefits: string[];
   usage_instructions: string | null;
+  specifications: Record<string, string> | null;
   seo_title: string | null;
   seo_description: string | null;
   is_featured: boolean;
@@ -82,7 +85,7 @@ type RawProduct = {
 
 const SELECT = `
   id, name, slug, short_description, description, ingredients, benefits,
-  usage_instructions, seo_title, seo_description, is_featured, sort_order,
+  usage_instructions, specifications, seo_title, seo_description, is_featured, sort_order,
   product_variants ( id, variant_name, quantity_value, quantity_unit,
                      mrp_paise, selling_price_paise, sku, stock, sort_order, is_active ),
   product_images ( id, storage_path, alt_text, sort_order, is_primary, width, height )
@@ -119,6 +122,7 @@ function shape(raw: RawProduct): CatalogProduct {
     ingredients: raw.ingredients ?? [],
     benefits: raw.benefits ?? [],
     usageInstructions: raw.usage_instructions,
+    specifications: raw.specifications ?? {},
     seoTitle: raw.seo_title,
     seoDescription: raw.seo_description,
     isFeatured: raw.is_featured,

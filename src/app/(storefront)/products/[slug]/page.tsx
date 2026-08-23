@@ -190,9 +190,56 @@ export default async function ProductPage({ params }: PageProps) {
               </p>
             </section>
           ) : null}
+
+          <Specifications specifications={product.specifications} />
         </div>
       </div>
     </article>
+  );
+}
+
+/**
+ * Product details taken from the physical label — shelf life, directions,
+ * suitability.
+ *
+ * "External use only" is pulled out of the list and rendered as a callout
+ * rather than a row in a table. It is the one entry here that is a safety
+ * instruction rather than a product fact, and burying a safety instruction in
+ * a definition list is how it goes unread.
+ */
+function Specifications({ specifications }: { specifications: Record<string, string> }) {
+  const entries = Object.entries(specifications).filter(([, value]) => Boolean(value));
+  if (entries.length === 0) return null;
+
+  const isSafetyNote = ([key, value]: [string, string]) =>
+    /^directions$/i.test(key) && /external use only/i.test(value);
+
+  const safety = entries.find(isSafetyNote);
+  const facts = entries.filter((entry) => !isSafetyNote(entry));
+
+  return (
+    <section aria-labelledby="details-heading" className="mt-10 border-t border-line pt-8">
+      <h2 id="details-heading" className="font-display text-xl font-semibold text-earth-900">
+        Product details
+      </h2>
+
+      {safety ? (
+        <p className="mt-4 rounded-xl border border-gold-400/50 bg-[--color-warning-surface] px-4 py-3 text-sm font-semibold text-[--color-warning]">
+          For external use only.
+        </p>
+      ) : null}
+
+      {facts.length > 0 ? (
+        <dl className="mt-4 divide-y divide-line border-t border-line">
+          {facts.map(([key, value]) => (
+            <div key={key} className="grid grid-cols-3 gap-4 py-3 text-sm">
+              <dt className="font-medium text-stone-500">{key}</dt>
+              <dd className="col-span-2 text-stone-700">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
   );
 }
 

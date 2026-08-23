@@ -23,12 +23,25 @@
 -- the contact details given in brief §7 (+918148993990, @Ssgproducts) — not
 -- invented accounts. No other social profiles are added.
 
-insert into store_settings (id, store_name, whatsapp, instagram_url)
-values (true, 'SSG Products', '+918148993990', 'https://instagram.com/ssgproducts')
+-- Email and manufacturing address are transcribed from the Herbal Hair Oil
+-- back label. Shipping and tax stay null — the packaging says nothing about
+-- either, so the store reports them as unconfigured rather than guessing.
+
+insert into store_settings (id, store_name, whatsapp, instagram_url, email, address)
+values (
+  true,
+  'SSG Products',
+  '+918148993990',
+  'https://instagram.com/ssgproducts',
+  'ssgproducts.india@gmail.com',
+  'Plot No. 13/66, 4th Street, Anbu Nagar, Alwarthirunagar, Chennai - 600 087, India'
+)
 on conflict (id) do update
   set store_name    = excluded.store_name,
       whatsapp      = excluded.whatsapp,
-      instagram_url = excluded.instagram_url;
+      instagram_url = excluded.instagram_url,
+      email         = excluded.email,
+      address       = excluded.address;
 
 -- ---------------------------------------------------------------------------
 -- Product 1 — SSG Herbal Shikakai Powder
@@ -113,13 +126,27 @@ where pv.product_id = p.id
 -- ---------------------------------------------------------------------------
 -- Product 2 — SSG Homemade Herbal Hair Oil
 -- ---------------------------------------------------------------------------
--- The four statements in `benefits` are transcribed from the product packaging
--- as quoted in brief §28. They are packaging claims, reproduced at their
--- original strength — deliberately not escalated into growth, hair-fall or
--- dandruff-cure claims, per §31.
+-- `benefits` is the BENEFITS block from the actual bottle label, transcribed
+-- verbatim. These are stronger than the four statements brief §28 listed, but
+-- they are the brand's own printed claims, so §31's instruction applies:
+-- preserve the meaning of the supplied material, neither weakened nor
+-- escalated. Nothing here says "guaranteed", "clinically proven", "cure" or
+-- "permanent" — and nothing may be edited to.
+--
+-- Ingredient spellings follow the bottle, with one exception: the label reads
+-- "Smalll Onion" with three Ls, which is a printing typo rather than a
+-- different ingredient, so it is set as "Small Onion". Note also that SSG's
+-- two products spell the same herb differently — "Karisalankanni" on the
+-- Shikakai artwork, "Karisalangani" here. Each product keeps its own label's
+-- spelling; see the note in the report.
+--
+-- `specifications` now carries shelf life and the external-use warning, both
+-- printed on the label. Brief §74 listed these as "do not invent" — they are
+-- no longer invented, they are transcribed.
 
 insert into products (
-  name, slug, short_description, ingredients, benefits, is_active, is_featured, sort_order
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
 )
 values (
   'SSG Homemade Herbal Hair Oil',
@@ -127,16 +154,24 @@ values (
   '100% Natural · Infused with 13+ Natural Herbs · For All Hair Types',
   array[
     'Coconut Oil', 'Amla', 'Hibiscus Leaves', 'Hibiscus Flower',
-    'Karisalankanni', 'Mehandi Leaves', 'Fenugreek Seeds', 'Small Onion',
+    'Karisalangani', 'Mehandi Leaves', 'Fenugreek Seeds', 'Small Onion',
     'Rose petals', 'Aloe Vera', 'Curry Leaves', 'Neem leaves', 'Vetiver',
     'Other Herbs'
   ],
   array[
-    '100% Natural',
-    'Homemade Herbal Hair Oil',
-    'Infused with 13+ Natural Herbs',
-    'For All Hair Types'
+    'Reduces Hair Fall',
+    'Makes Hair Thick & Stronger',
+    'Helpful in Premature Greying',
+    'Treats Dandruff',
+    'Nourishes Hair Growth & Looks Shining',
+    'Restores Hair Strength'
   ],
+  jsonb_build_object(
+    'Shelf life', 'Best before 12 months from packaging',
+    'Directions', 'External use only',
+    'Herbs', 'Infused with 13+ natural herbs',
+    'Suitable for', 'All hair types'
+  ),
   true,
   true,
   2
@@ -146,6 +181,7 @@ on conflict (slug) do update
       short_description = excluded.short_description,
       ingredients       = excluded.ingredients,
       benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
       is_active         = excluded.is_active,
       is_featured       = excluded.is_featured,
       sort_order        = excluded.sort_order;
