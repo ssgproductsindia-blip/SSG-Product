@@ -2,10 +2,26 @@ import Link from 'next/link';
 import { Leaf, Sparkles, Sprout } from 'lucide-react';
 
 import { ProductCard } from '@/components/catalog/product-card';
+import { ProductSearch, type SearchableProduct } from '@/components/catalog/product-search';
 import { Button } from '@/components/ui/button';
 import { Reveal } from '@/components/ui/reveal';
 import { BRAND } from '@/lib/brand';
+import { getBestSellingProducts } from '@/server/best-sellers';
 import { listProducts, type CatalogProduct } from '@/server/catalog';
+
+/** How many product cards the homepage scroll section shows before "View all". */
+const HOMEPAGE_PRODUCT_LIMIT = 3;
+
+function toSearchable(product: CatalogProduct): SearchableProduct {
+  return {
+    id: product.id,
+    name: product.name,
+    slug: product.slug,
+    shortDescription: product.shortDescription,
+    imageUrl: product.images[0]?.url ?? null,
+    fromPaise: product.leadVariant?.selling_price_paise ?? null,
+  };
+}
 
 /**
  * Homepage.
@@ -32,8 +48,15 @@ export default async function HomePage() {
     loadFailed = true;
   }
 
+  // getBestSellingProducts never throws (see its own docstring) and returns
+  // [] on a fresh store with no order history yet — the search bar hides its
+  // "Popular" row entirely in that case rather than showing an empty label.
+  const popular = loadFailed ? [] : await getBestSellingProducts(4);
+
   const featured = products.filter((p) => p.isFeatured);
-  const showcase = featured.length > 0 ? featured : products;
+  // Capped so the scroll section stays a curated preview rather than the full
+  // catalogue — "View all" is how a visitor reaches everything else.
+  const showcase = (featured.length > 0 ? featured : products).slice(0, HOMEPAGE_PRODUCT_LIMIT);
 
   // Union of every ingredient in the catalogue, de-duplicated case-insensitively.
   const ingredients = Array.from(
@@ -118,6 +141,17 @@ export default async function HomePage() {
             ) : null}
           </div>
         </Reveal>
+
+        {!loadFailed && products.length > 0 ? (
+          <Reveal delay={40}>
+            <div className="mt-8">
+              <ProductSearch
+                products={products.map(toSearchable)}
+                popular={popular.map(toSearchable)}
+              />
+            </div>
+          </Reveal>
+        ) : null}
 
         {loadFailed ? (
           <CatalogueError />

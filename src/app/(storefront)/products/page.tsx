@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 
 import { ProductCard } from '@/components/catalog/product-card';
+import { Button } from '@/components/ui/button';
 import { Reveal } from '@/components/ui/reveal';
 import { listProducts, type CatalogProduct } from '@/server/catalog';
 
@@ -11,15 +13,40 @@ export const metadata: Metadata = {
   alternates: { canonical: '/products' },
 };
 
-export default async function ProductsPage() {
-  let products: CatalogProduct[] = [];
+/**
+ * Filtered client-side against the already-fetched catalogue, same as the
+ * homepage search bar and for the same reason — the catalogue is small
+ * enough that a second round trip to the database would cost more than it
+ * saves. Worth revisiting with a real search index once the product count
+ * makes that untrue.
+ */
+function matches(product: CatalogProduct, term: string): boolean {
+  const needle = term.toLowerCase();
+  return (
+    product.name.toLowerCase().includes(needle) ||
+    (product.shortDescription?.toLowerCase().includes(needle) ?? false) ||
+    product.ingredients.some((i) => i.toLowerCase().includes(needle))
+  );
+}
+
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const params = await searchParams;
+  const query = params.q?.trim() ?? '';
+
+  let allProducts: CatalogProduct[] = [];
   let loadFailed = false;
 
   try {
-    products = await listProducts();
+    allProducts = await listProducts();
   } catch {
     loadFailed = true;
   }
+
+  const products = query ? allProducts.filter((p) => matches(p, query)) : allProducts;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
@@ -29,8 +56,20 @@ export default async function ProductsPage() {
             Products
           </h1>
           <p className="mt-4 max-w-xl text-lg leading-relaxed text-stone-600">
-            Every SSG blend, in every pack size we make.
+            {query ? (
+              <>
+                {products.length} result{products.length === 1 ? '' : 's'} for &ldquo;{query}
+                &rdquo;
+              </>
+            ) : (
+              'Every SSG blend, in every pack size we make.'
+            )}
           </p>
+          {query ? (
+            <Button asChild variant="ghost" size="sm" className="mt-2 -ml-3">
+              <Link href="/products">Clear search</Link>
+            </Button>
+          ) : null}
         </header>
       </Reveal>
 
@@ -49,10 +88,16 @@ export default async function ProductsPage() {
       ) : products.length === 0 ? (
         <div className="mt-12 rounded-2xl border border-dashed border-line bg-surface p-10 text-center">
           <p className="font-display text-lg font-semibold text-earth-900">
-            No products available yet.
+            {query ? `No products match "${query}".` : 'No products available yet.'}
           </p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-muted">
-            Check back shortly — we&rsquo;re getting the shelves ready.
+            {query ? (
+              <Link href="/products" className="text-green-800 hover:underline">
+                Browse all products instead
+              </Link>
+            ) : (
+              "Check back shortly — we're getting the shelves ready."
+            )}
           </p>
         </div>
       ) : (
