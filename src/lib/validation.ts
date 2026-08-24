@@ -230,3 +230,94 @@ export const storeSettingsSchema = z.object({
   shippingFlatPaise: z.number().int().min(0).max(10_000_000).nullable().optional(),
   freeShippingThresholdPaise: z.number().int().min(0).max(100_000_000).nullable().optional(),
 });
+
+// ---------------------------------------------------------------------------
+// Customer accounts
+// ---------------------------------------------------------------------------
+
+/**
+ * At least 8 characters with a letter and a number. Not a "strong password"
+ * checklist of symbol classes — those tend to push people toward
+ * "Password1!" and away from a longer passphrase, which is the thing that
+ * actually resists guessing. Supabase enforces its own minimum server-side
+ * regardless of what this schema requires.
+ */
+export const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters.')
+  .max(72, 'Password is too long.') // bcrypt's effective limit
+  .refine((v) => /[a-zA-Z]/.test(v) && /[0-9]/.test(v), {
+    message: 'Password must include both letters and numbers.',
+  });
+
+export const signUpSchema = z
+  .object({
+    fullName: z.string().trim().min(2, 'Enter your full name.').max(120),
+    email: emailSchema,
+    phone: phoneSchema,
+    password: passwordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+export type SignUpInput = z.infer<typeof signUpSchema>;
+
+export const signInSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1, 'Enter your password.'),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+export const resetPasswordSchema = z
+  .object({
+    password: passwordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+export const profileSchema = z.object({
+  fullName: z.string().trim().min(2, 'Enter your full name.').max(120),
+  phone: phoneSchema,
+});
+
+export const addressSchema = z.object({
+  label: z.string().trim().max(40).optional().or(z.literal('')),
+  name: z.string().trim().min(2, 'Enter a full name.').max(120),
+  phone: phoneSchema,
+  address: z.string().trim().min(8, 'Enter the full address.').max(400),
+  apartment: z.string().trim().max(120).optional().or(z.literal('')),
+  city: z.string().trim().min(2, 'Enter a city.').max(120),
+  state: z.string().trim().min(2, 'Enter a state.').max(120),
+  postalCode: pincodeSchema,
+  country: z.string().trim().min(2).max(80).default('India'),
+  isDefault: z.boolean().default(false),
+});
+
+export type AddressInput = z.infer<typeof addressSchema>;
+
+// ---------------------------------------------------------------------------
+// Contact form
+// ---------------------------------------------------------------------------
+
+export const contactMessageSchema = z.object({
+  name: z.string().trim().min(2, 'Enter your name.').max(120),
+  email: emailSchema,
+  phone: z.string().trim().max(20).optional().or(z.literal('')),
+  subject: z.string().trim().min(2, 'Enter a subject.').max(150),
+  message: z.string().trim().min(10, 'Message must be at least 10 characters.').max(4000),
+  // Honeypot: a real visitor never sees or fills this field (hidden via CSS).
+  // A bot filling every input on the form trips it. Any non-empty value here
+  // is treated as spam and silently accepted without sending mail.
+  website: z.string().max(200).optional().or(z.literal('')),
+});
+
+export type ContactMessageInput = z.infer<typeof contactMessageSchema>;

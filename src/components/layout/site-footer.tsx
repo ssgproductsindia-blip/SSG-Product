@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import { InstagramIcon, WhatsAppIcon } from '@/components/brand/social-icons';
 
 import { Logo } from '@/components/brand/logo';
+import { InstagramIcon, WhatsAppIcon } from '@/components/brand/social-icons';
 import { BRAND, formatPhone, whatsappUrl } from '@/lib/brand';
-import { getStoreSettings } from '@/server/catalog';
+import { getStoreSettings, listProducts } from '@/server/catalog';
 
 /**
  * Site footer.
@@ -15,9 +15,13 @@ import { getStoreSettings } from '@/server/catalog';
  *
  * Only the two channels the brand actually has are listed. No invented
  * Facebook, X or YouTube links (brief §7).
+ *
+ * The Shop column is generated from `listProducts()` rather than hardcoded —
+ * a new product added in the admin panel appears in the footer on its own,
+ * with no template change required.
  */
 export async function SiteFooter() {
-  const settings = await getStoreSettings();
+  const [settings, products] = await Promise.all([getStoreSettings(), listProducts()]);
 
   const whatsapp = whatsappUrl(settings?.whatsapp);
   const whatsappLabel = formatPhone(settings?.whatsapp);
@@ -31,8 +35,8 @@ export async function SiteFooter() {
   return (
     <footer className="mt-24 border-t border-line bg-earth-900 text-earth-100">
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
-        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="lg:col-span-2">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="sm:col-span-2 lg:col-span-2">
             <div className="[&_span]:!text-earth-50">
               <Logo size={44} />
             </div>
@@ -46,22 +50,44 @@ export async function SiteFooter() {
               Shop
             </h2>
             <ul className="mt-4 space-y-2.5 text-sm">
-              <FooterLink href="/products">All products</FooterLink>
-              <FooterLink href="/cart">Cart</FooterLink>
-              <FooterLink href="/track-order">Track your order</FooterLink>
-              <FooterLink href="/contact">Contact</FooterLink>
+              <FooterLink href="/products">All Products</FooterLink>
+              {products.map((product) => (
+                <FooterLink key={product.id} href={`/products/${product.slug}`}>
+                  {product.name.replace(/^SSG\s+/i, '')}
+                </FooterLink>
+              ))}
+            </ul>
+          </nav>
+
+          <nav aria-labelledby="footer-company">
+            <h2 id="footer-company" className="text-sm font-semibold text-white">
+              Company
+            </h2>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              <FooterLink href="/about">About Us</FooterLink>
+              <FooterLink href="/contact">Contact Us</FooterLink>
+            </ul>
+          </nav>
+
+          <nav aria-labelledby="footer-care">
+            <h2 id="footer-care" className="text-sm font-semibold text-white">
+              Customer Care
+            </h2>
+            <ul className="mt-4 space-y-2.5 text-sm">
+              <FooterLink href="/faq">FAQ</FooterLink>
+              <FooterLink href="/shipping">Shipping</FooterLink>
+              <FooterLink href="/returns">Returns</FooterLink>
+              <FooterLink href="/track-order">Track Order</FooterLink>
             </ul>
           </nav>
 
           <nav aria-labelledby="footer-legal">
             <h2 id="footer-legal" className="text-sm font-semibold text-white">
-              Policies
+              Legal
             </h2>
             <ul className="mt-4 space-y-2.5 text-sm">
-              <FooterLink href="/shipping-policy">Shipping policy</FooterLink>
-              <FooterLink href="/returns-policy">Returns &amp; refunds</FooterLink>
-              <FooterLink href="/privacy-policy">Privacy policy</FooterLink>
-              <FooterLink href="/terms">Terms</FooterLink>
+              <FooterLink href="/privacy">Privacy Policy</FooterLink>
+              <FooterLink href="/terms">Terms &amp; Conditions</FooterLink>
             </ul>
           </nav>
         </div>

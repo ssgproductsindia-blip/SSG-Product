@@ -48,7 +48,7 @@ export type EmailOrder = {
   trackUrl: string;
 };
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   // Customer-supplied strings (names, addresses) end up inside this HTML.
   // Escaping is not optional: an unescaped name is an injection into every
   // inbox that receives the mail, including the store owner's BCC copy.

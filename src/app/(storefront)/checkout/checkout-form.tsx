@@ -7,8 +7,8 @@ import { useEffect, useState } from 'react';
 import { useCart } from '@/components/cart/cart-provider';
 import { Button } from '@/components/ui/button';
 import { formatPaise } from '@/lib/money';
-import { cn } from '@/lib/utils';
 import { placeOrderAction } from '@/server/actions/checkout-actions';
+import { Field, TextAreaField } from '@/components/forms/field';
 
 /**
  * Checkout.
@@ -20,17 +20,50 @@ import { placeOrderAction } from '@/server/actions/checkout-actions';
  * The summary shown here is the local snapshot, labelled as indicative. If it
  * ever disagrees with what the server computes, the server wins and the
  * confirmation reflects the real figure.
+ *
+ * Guest checkout is unchanged and unconditional. `customer` and `addresses`
+ * are optional props supplied only when the visitor is signed in — they
+ * prefill fields and offer a saved-address picker, but every field stays
+ * editable and nothing here requires an account. A guest sees exactly the
+ * form that existed before accounts did.
  */
 
 type FieldErrors = Record<string, string>;
 
-export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) {
+export type SavedAddress = {
+  id: string;
+  label: string | null;
+  name: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  isDefault: boolean;
+};
+
+type CheckoutFormProps = {
+  paymentsEnabled: boolean;
+  customer?: { name: string; email: string; phone: string } | null;
+  addresses?: SavedAddress[];
+};
+
+export function CheckoutForm({
+  paymentsEnabled,
+  customer = null,
+  addresses = [],
+}: CheckoutFormProps) {
   const router = useRouter();
   const { items, hydrated, indicativeSubtotalPaise, clear } = useCart();
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  const defaultAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
+  const [selectedAddressId, setSelectedAddressId] = useState(defaultAddress?.id ?? '');
+  const selectedAddress = addresses.find((a) => a.id === selectedAddressId) ?? null;
 
   // An empty cart at checkout means someone deep-linked or emptied it in
   // another tab. Send them back rather than rendering a form that cannot work.
@@ -87,8 +120,15 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
     // Only clear once the order is definitely written. Clearing optimistically
     // would destroy the cart if the call had failed.
     clear();
+    const email = value('email');
     router.push(
-      `/order/confirmed?order=${encodeURIComponent(result.orderNumber)}&email=${result.emailSent ? '1' : '0'}`,
+      `/order/confirmed?order=${encodeURIComponent(result.orderNumber)}` +
+        `&email=${result.emailSent ? '1' : '0'}` +
+        // The confirmation page offers "create an account to track this
+        // order" only to guests — a signed-in buyer's order is already
+        // linked to their account, so the prompt would be redundant.
+        `&guest=${result.authenticated ? '0' : '1'}` +
+        (result.authenticated ? '' : `&e=${encodeURIComponent(email)}`),
     );
   }
 
@@ -116,6 +156,7 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               label="Full name"
               autoComplete="name"
               required
+              defaultValue={customer?.name}
               error={fieldErrors['customer.name']}
               className="sm:col-span-2"
             />
@@ -125,7 +166,16 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               type="email"
               autoComplete="email"
               required
-              hint="Your order confirmation and tracking link go here."
+              defaultValue={customer?.email}
+              // A signed-in customer's email is their account identity;
+              // changing it here would not change their account email, which
+              // would be confusing. They can update it from their profile.
+              readOnly={Boolean(customer)}
+              hint={
+                customer
+                  ? 'Your account email. Change it from your profile.'
+                  : 'Your order confirmation and tracking link go here.'
+              }
               error={fieldErrors['customer.email']}
             />
             <Field
@@ -134,6 +184,7 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               type="tel"
               autoComplete="tel"
               required
+              defaultValue={customer?.phone}
               hint="10-digit Indian mobile."
               error={fieldErrors['customer.phone']}
             />
@@ -144,13 +195,43 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
           <legend className="font-display text-xl font-semibold text-earth-900">
             Shipping address
           </legend>
-          <div className="mt-5 grid gap-5 sm:grid-cols-2">
-            <Field
+
+          {addresses.length > 0 ? (
+            <div className="mt-4">
+              <label htmlFor="savedAddress" className="block text-sm font-medium text-earth-900">
+                Use a saved address
+              </label>
+              <select
+                id="savedAddress"
+                value={selectedAddressId}
+                onChange={(event) => setSelectedAddressId(event.currentTarget.value)}
+                className="mt-2 w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-base text-earth-900 focus:border-green-600 sm:max-w-sm"
+              >
+                <option value="">Enter a new address</option>
+                {addresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label ? `${a.label} — ` : ''}
+                    {a.address}, {a.city}
+                    {a.isDefault ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {/*
+            Keyed on the selected address so choosing a different one remounts
+            these uncontrolled fields with new defaultValues, rather than
+            fighting React over who owns the input state.
+          */}
+          <div key={selectedAddressId} className="mt-5 grid gap-5 sm:grid-cols-2">
+            <TextAreaField
               name="address"
               label="Address"
               autoComplete="street-address"
               required
-              multiline
+              rows={3}
+              defaultValue={selectedAddress?.address}
               error={fieldErrors['shipping.address']}
               className="sm:col-span-2"
             />
@@ -159,6 +240,7 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               label="City"
               autoComplete="address-level2"
               required
+              defaultValue={selectedAddress?.city}
               error={fieldErrors['shipping.city']}
             />
             <Field
@@ -166,6 +248,7 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               label="State"
               autoComplete="address-level1"
               required
+              defaultValue={selectedAddress?.state}
               error={fieldErrors['shipping.state']}
             />
             <Field
@@ -174,21 +257,22 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
               autoComplete="postal-code"
               inputMode="numeric"
               required
+              defaultValue={selectedAddress?.postalCode}
               error={fieldErrors['shipping.postalCode']}
             />
             <Field
               name="country"
               label="Country"
               autoComplete="country-name"
-              defaultValue="India"
+              defaultValue={selectedAddress?.country ?? 'India'}
               required
               error={fieldErrors['shipping.country']}
             />
-            <Field
+            <TextAreaField
               name="notes"
               label="Delivery notes"
               optional
-              multiline
+              rows={3}
               error={fieldErrors['notes']}
               className="sm:col-span-2"
             />
@@ -248,6 +332,15 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
             {submitting ? 'Placing order…' : 'Place order'}
           </Button>
 
+          {!customer ? (
+            <p className="mt-4 text-center text-xs text-ink-muted">
+              <Link href={`/signin?next=${encodeURIComponent('/checkout')}`} className="text-green-800 hover:underline">
+                Sign in
+              </Link>{' '}
+              to use a saved address, or continue as a guest.
+            </p>
+          ) : null}
+
           <p className="mt-4 text-center text-xs text-ink-muted">
             <Link href="/cart" className="hover:text-green-800 hover:underline">
               Back to cart
@@ -256,79 +349,5 @@ export function CheckoutForm({ paymentsEnabled }: { paymentsEnabled: boolean }) 
         </div>
       </aside>
     </form>
-  );
-}
-
-/**
- * Labelled form field.
- *
- * Every input has a real <label>, errors are wired through aria-describedby
- * and aria-invalid, and required fields carry `required` rather than only a
- * visual asterisk. `noValidate` on the form means our messages show instead of
- * the browser's, so these attributes are what a screen reader has to go on.
- */
-function Field({
-  name,
-  label,
-  type = 'text',
-  error,
-  hint,
-  optional = false,
-  multiline = false,
-  className,
-  ...rest
-}: {
-  name: string;
-  label: string;
-  type?: string;
-  error?: string;
-  hint?: string;
-  optional?: boolean;
-  multiline?: boolean;
-  className?: string;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'name' | 'type' | 'className'>) {
-  const describedBy = [hint ? `${name}-hint` : null, error ? `${name}-error` : null]
-    .filter(Boolean)
-    .join(' ');
-
-  const shared = {
-    id: name,
-    name,
-    'aria-invalid': error ? true : undefined,
-    'aria-describedby': describedBy || undefined,
-    className: cn(
-      'w-full rounded-xl border bg-surface px-3.5 py-3 text-base text-earth-900',
-      'placeholder:text-stone-400 transition-colors',
-      error ? 'border-[--color-danger]' : 'border-line focus:border-green-600',
-    ),
-  };
-
-  return (
-    <div className={className}>
-      <label htmlFor={name} className="block text-sm font-medium text-earth-900">
-        {label}
-        {optional ? <span className="ml-1.5 font-normal text-ink-muted">(optional)</span> : null}
-      </label>
-
-      {hint ? (
-        <p id={`${name}-hint`} className="mt-1 text-xs text-ink-muted">
-          {hint}
-        </p>
-      ) : null}
-
-      <div className="mt-2">
-        {multiline ? (
-          <textarea rows={3} {...shared} {...(rest as React.TextareaHTMLAttributes<HTMLTextAreaElement>)} />
-        ) : (
-          <input type={type} {...shared} {...rest} />
-        )}
-      </div>
-
-      {error ? (
-        <p id={`${name}-error`} role="alert" className="mt-1.5 text-sm text-[--color-danger]">
-          {error}
-        </p>
-      ) : null}
-    </div>
   );
 }

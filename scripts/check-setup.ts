@@ -81,6 +81,7 @@ async function main() {
     'customers', 'orders', 'order_items', 'shipping_addresses',
     'shipments', 'notification_logs', 'admin_audit_logs', 'store_settings',
     'admin_users', 'product_bundles', 'bundle_items',
+    'profiles', 'customer_addresses',
   ];
 
   // NOTE: do not use `{ head: true, count: 'exact' }` here. A HEAD request
@@ -167,7 +168,10 @@ async function main() {
     pubProductsError?.message ?? (pubProducts?.length ? undefined : 'no products visible to anon'),
   );
 
-  for (const table of ['orders', 'customers', 'shipping_addresses', 'order_items', 'shipments']) {
+  for (const table of [
+    'orders', 'customers', 'shipping_addresses', 'order_items', 'shipments',
+    'profiles', 'customer_addresses',
+  ]) {
     // A table that does not exist also cannot be read, which would report as a
     // PASS and mean nothing. Confirm the table is really there (service role)
     // before treating an anon block as evidence that RLS is doing its job.

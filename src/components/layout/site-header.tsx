@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Menu, ShoppingBag, X } from 'lucide-react';
+import { Menu, ShoppingBag, User, X } from 'lucide-react';
 
 import { useCart } from '@/components/cart/cart-provider';
 import { cn } from '@/lib/utils';
@@ -26,8 +26,13 @@ const LINKS = [
  * The logo is passed in as a prop rather than imported, because <Logo> reads
  * the filesystem to decide whether the real asset exists, which a client
  * component cannot do.
+ *
+ * `signedIn` is resolved server-side in the storefront layout (getCustomer())
+ * and passed down for the same reason: this is a client component, and
+ * whether someone is authenticated is a server-verified fact, not something
+ * to re-derive from a client-readable cookie.
  */
-export function SiteHeader({ logo }: { logo: ReactNode }) {
+export function SiteHeader({ logo, signedIn = false }: { logo: ReactNode; signedIn?: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -109,6 +114,22 @@ export function SiteHeader({ logo }: { logo: ReactNode }) {
 
           <div className="flex items-center gap-1">
             <Link
+              href={signedIn ? '/account' : '/signin'}
+              className="hidden h-11 items-center justify-center rounded-full px-4 text-sm font-medium text-stone-700 transition-colors hover:bg-green-50 hover:text-green-800 sm:inline-flex"
+            >
+              <User className="mr-1.5 size-4" aria-hidden />
+              {signedIn ? 'Account' : 'Sign In'}
+            </Link>
+
+            <Link
+              href={signedIn ? '/account' : '/signin'}
+              aria-label={signedIn ? 'My account' : 'Sign in'}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-700 transition-colors hover:bg-green-50 hover:text-green-800 sm:hidden"
+            >
+              <User className="size-5" aria-hidden />
+            </Link>
+
+            <Link
               href="/cart"
               className="relative inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-700 transition-colors hover:bg-green-50 hover:text-green-800"
               aria-label={
@@ -176,6 +197,15 @@ export function SiteHeader({ logo }: { logo: ReactNode }) {
                   </li>
                 );
               })}
+              <li>
+                <Link
+                  href={signedIn ? '/account' : '/signin'}
+                  onClick={() => setMenuOpen(false)}
+                  className="block rounded-lg px-3 py-3 text-base font-medium text-stone-700 transition-colors hover:bg-green-50"
+                >
+                  {signedIn ? 'My Account' : 'Sign In'}
+                </Link>
+              </li>
             </ul>
           </nav>
         </div>

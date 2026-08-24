@@ -105,6 +105,29 @@ export type OrderRow = Timestamps & {
   payment_provider: string | null;
   payment_reference: string | null;
   notes: string | null;
+  /** Set only when the buyer was signed in at checkout. Null for guest orders. */
+  auth_user_id: string | null;
+}
+
+export type ProfileRow = Timestamps & {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+}
+
+export type CustomerAddressRow = Timestamps & {
+  id: string;
+  profile_id: string;
+  label: string | null;
+  name: string;
+  phone: string;
+  address: string;
+  apartment: string | null;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+  is_default: boolean;
 }
 
 export type OrderItemRow = {
@@ -278,6 +301,11 @@ export type Database = {
       >;
       store_settings: Table<StoreSettingsRow, Insertable<StoreSettingsRow, 'id' | 'updated_at'>>;
       admin_users: Table<AdminUserRow, Insertable<AdminUserRow, 'created_at' | 'role'>>;
+      profiles: Table<ProfileRow, Insertable<ProfileRow, 'created_at' | 'updated_at'>>;
+      customer_addresses: Table<
+        CustomerAddressRow,
+        Insertable<CustomerAddressRow, 'id' | 'created_at' | 'updated_at' | 'is_default'>
+      >;
     };
     Views: Record<never, never>;
     Functions: {
@@ -297,6 +325,7 @@ export type Database = {
           };
           p_items: { variant_id: string; quantity: number }[];
           p_notes: string | null;
+          p_auth_user_id?: string | null;
         };
         Returns: unknown;
       };

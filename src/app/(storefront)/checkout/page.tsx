@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 
 import { paymentsConfigured } from '@/lib/env';
+import { listAddressesAction } from '@/server/actions/address-actions';
+import { getCustomer } from '@/server/customer-auth';
 
 import { CheckoutForm } from './checkout-form';
 
@@ -9,10 +11,18 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function CheckoutPage() {
-  // Resolved on the server: whether payments are live is a function of which
-  // secrets exist, and that must never be decided in the browser.
+/**
+ * Checkout page shell.
+ *
+ * Guest checkout is unchanged: getCustomer() returns null for a guest, so
+ * `customer` and `addresses` are simply empty and the form renders exactly as
+ * it always has. Signing in only adds prefill and a saved-address picker on
+ * top of the same fields — it does not gate the flow.
+ */
+export default async function CheckoutPage() {
   const paymentsEnabled = paymentsConfigured();
+  const customer = await getCustomer();
+  const addresses = customer ? await listAddressesAction() : [];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
@@ -20,7 +30,26 @@ export default function CheckoutPage() {
         Checkout
       </h1>
       <div className="mt-10">
-        <CheckoutForm paymentsEnabled={paymentsEnabled} />
+        <CheckoutForm
+          paymentsEnabled={paymentsEnabled}
+          customer={
+            customer
+              ? { name: customer.fullName ?? '', email: customer.email, phone: customer.phone ?? '' }
+              : null
+          }
+          addresses={addresses.map((a) => ({
+            id: a.id,
+            label: a.label,
+            name: a.name,
+            phone: a.phone,
+            address: a.apartment ? `${a.apartment}, ${a.address}` : a.address,
+            city: a.city,
+            state: a.state,
+            postalCode: a.postal_code,
+            country: a.country,
+            isDefault: a.is_default,
+          }))}
+        />
       </div>
     </div>
   );

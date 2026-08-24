@@ -7,6 +7,7 @@ import { clientKey, rateLimit } from '@/lib/rate-limit';
 import { checkoutSchema } from '@/lib/validation';
 import { orderConfirmationEmail } from '@/lib/email/templates';
 import { sendOrderEmail } from '@/lib/email/send';
+import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 
 /**
@@ -31,6 +32,8 @@ export type PlaceOrderResult =
       orderNumber: string;
       /** True when the confirmation email actually went out. */
       emailSent: boolean;
+      /** True when the order was linked to a signed-in customer account. */
+      authenticated: boolean;
     }
   | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
@@ -90,6 +93,17 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
   }
 
   const { customer, shipping, items, notes } = parsed.data;
+
+  // Resolve the buyer's identity from their own session cookie, never from
+  // anything the client submitted in the payload. This is what makes
+  // "associate the order with the authenticated customer" (brief §19) safe:
+  // there is no field in the request a browser could edit to claim someone
+  // else's account, because the id never travels through the request body.
+  const sessionClient = await createClient();
+  const {
+    data: { user: sessionUser },
+  } = await sessionClient.auth.getUser();
+
   const supabase = createServiceClient();
 
   const { data, error } = await supabase.rpc('create_order', {
@@ -103,6 +117,7 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     },
     p_items: items.map((i) => ({ variant_id: i.variantId, quantity: i.quantity })),
     p_notes: notes ?? null,
+    p_auth_user_id: sessionUser?.id ?? null,
   } as never);
 
   if (error) {
@@ -173,5 +188,10 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     emailSent = false;
   }
 
-  return { ok: true, orderNumber: result.order_number, emailSent };
+  return {
+    ok: true,
+    orderNumber: result.order_number,
+    emailSent,
+    authenticated: Boolean(sessionUser),
+  };
 }

@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 export default async function OrderConfirmedPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string; email?: string }>;
+  searchParams: Promise<{ order?: string; email?: string; guest?: string; e?: string }>;
 }) {
   const params = await searchParams;
   const orderNumber = params.order?.trim().toUpperCase() ?? '';
@@ -37,6 +37,11 @@ export default async function OrderConfirmedPage({
   }
 
   const emailSent = params.email === '1';
+  // Only offered to guests — a signed-in buyer's order is already linked to
+  // their account (see the auth_user_id passed server-side in
+  // checkout-actions.ts), so the prompt would be redundant for them.
+  const isGuest = params.guest === '1';
+  const guestEmail = isGuest ? params.e ?? '' : '';
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6 sm:py-24">
@@ -86,6 +91,25 @@ export default async function OrderConfirmedPage({
           <Link href="/products">Continue shopping</Link>
         </Button>
       </div>
+
+      {isGuest ? (
+        <div className="mx-auto mt-10 max-w-md rounded-2xl border border-green-200 bg-green-50 p-6">
+          <p className="font-display text-base font-semibold text-green-900">
+            Want to track your orders more easily?
+          </p>
+          <p className="mt-1.5 text-sm leading-relaxed text-green-800">
+            Create an SSG account with the same email and this order will
+            appear under My Orders automatically.
+          </p>
+          <Button asChild size="sm" className="mt-4">
+            <Link
+              href={`/signup${guestEmail ? `?email=${encodeURIComponent(guestEmail)}` : ''}`}
+            >
+              Create an account
+            </Link>
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
