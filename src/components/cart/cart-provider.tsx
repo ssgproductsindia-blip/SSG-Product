@@ -4,29 +4,28 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 
 /**
  * Cart state.
  *
- * Persisted to localStorage so a cart survives a refresh without requiring an
- * account. What is stored is a DISPLAY SNAPSHOT: enough to render the cart
- * (name, variant, image, the price as last seen) plus the two fields that
- * actually matter — `variantId` and `quantity`.
+ * Backed by localStorage and read through `useSyncExternalStore`, which is the
+ * API React provides for exactly this: state that lives outside React and can
+ * change without React knowing. Seeding it with a `useEffect` + `setState`
+ * would also work, but it triggers a second render pass on every mount and
+ * React now flags it, so this uses the intended mechanism instead.
+ *
+ * What is stored is a DISPLAY SNAPSHOT: enough to render the cart (name,
+ * variant, image, the price as last seen) plus the two fields that actually
+ * matter — `variantId` and `quantity`.
  *
  * The stored price is for rendering only and is never trusted. Checkout sends
  * variant ids and quantities; the server re-reads every price from the
- * database (see src/server/pricing.ts and the create_order function). A
- * customer who edits localStorage changes what their own screen says and
- * nothing about what they are charged.
- *
- * This also means a price change while an item sits in someone's cart is
- * handled honestly: the cart page re-prices on load and tells them if
- * something moved, rather than silently honouring a stale number.
+ * database. A customer who edits localStorage changes what their own screen
+ * says and nothing about what they are charged.
  */
 
 export type CartItem = {
@@ -41,35 +40,30 @@ export type CartItem = {
   imageUrl: string | null;
 };
 
-type CartContextValue = {
-  items: CartItem[];
-  itemCount: number;
-  /** Subtotal from the local snapshot — indicative only, never charged. */
-  indicativeSubtotalPaise: number;
-  add: (item: Omit<CartItem, 'quantity'>, quantity?: number) => void;
-  setQuantity: (variantId: string, quantity: number) => void;
-  remove: (variantId: string) => void;
-  clear: () => void;
-  /** False until localStorage has been read, so SSR and first paint agree. */
-  hydrated: boolean;
-};
-
 const STORAGE_KEY = 'ssg.cart.v1';
 const MAX_QTY = 99;
 
-const CartContext = createContext<CartContextValue | null>(null);
+/** Stable empty reference. getSnapshot must never return a fresh array. */
+const EMPTY: CartItem[] = [];
 
-function readStorage(): CartItem[] {
+// ---------------------------------------------------------------------------
+// External store
+// ---------------------------------------------------------------------------
+
+let cache: CartItem[] = EMPTY;
+let loaded = false;
+const listeners = new Set<() => void>();
+
+function parse(raw: string | null): CartItem[] {
+  if (!raw) return EMPTY;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return EMPTY;
 
     // Validate on read. localStorage is user-writable and may also hold data
     // from an older shape of this app; anything malformed is dropped rather
     // than crashing the cart on render.
-    return parsed.filter((item): item is CartItem => {
+    const valid = parsed.filter((item): item is CartItem => {
       if (typeof item !== 'object' || item === null) return false;
       const i = item as Record<string, unknown>;
       return (
@@ -83,68 +77,128 @@ function readStorage(): CartItem[] {
         typeof i.sellingPricePaise === 'number'
       );
     });
+
+    return valid.length > 0 ? valid : EMPTY;
   } catch {
-    return [];
+    return EMPTY;
   }
 }
 
+function readStorage(): CartItem[] {
+  try {
+    return parse(window.localStorage.getItem(STORAGE_KEY));
+  } catch {
+    return EMPTY;
+  }
+}
+
+function emit() {
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+
+  // Keep tabs in step: adding an item in one tab updates the others.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEY) return;
+    cache = parse(event.newValue);
+    emit();
+  };
+
+  window.addEventListener('storage', onStorage);
+
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener('storage', onStorage);
+  };
+}
+
+function getSnapshot(): CartItem[] {
+  // Read once, then serve the cached reference. Returning a new array on every
+  // call would make React think the store changed on every render and loop.
+  if (!loaded) {
+    cache = readStorage();
+    loaded = true;
+  }
+  return cache;
+}
+
+/** The server has no cart. React uses this for SSR and hydration. */
+function getServerSnapshot(): CartItem[] {
+  return EMPTY;
+}
+
+function write(next: CartItem[]) {
+  cache = next;
+  loaded = true;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Private browsing or a full quota. The cart still works for this session;
+    // it just will not survive a reload.
+  }
+  emit();
+}
+
+/** Tiny store that is false during SSR and true once mounted on the client. */
+const noopSubscribe = () => () => {};
+const alwaysTrue = () => true;
+const alwaysFalse = () => false;
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+type CartContextValue = {
+  items: CartItem[];
+  itemCount: number;
+  /** Subtotal from the local snapshot — indicative only, never charged. */
+  indicativeSubtotalPaise: number;
+  add: (item: Omit<CartItem, 'quantity'>, quantity?: number) => void;
+  setQuantity: (variantId: string, quantity: number) => void;
+  remove: (variantId: string) => void;
+  clear: () => void;
+  /** False during SSR and the hydration pass, so markup matches. */
+  hydrated: boolean;
+};
+
+const CartContext = createContext<CartContextValue | null>(null);
+
 export function CartProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-
-  // Read after mount, never during render: the server has no localStorage, and
-  // seeding state from it directly would produce a hydration mismatch.
-  useEffect(() => {
-    setItems(readStorage());
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      // Private browsing or a full quota. The cart still works for this
-      // session; it just will not survive a reload.
-    }
-  }, [items, hydrated]);
-
-  // Keep tabs in step, so adding an item in one tab is reflected in another.
-  useEffect(() => {
-    function onStorage(event: StorageEvent) {
-      if (event.key === STORAGE_KEY) setItems(readStorage());
-    }
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const hydrated = useSyncExternalStore(noopSubscribe, alwaysTrue, alwaysFalse);
 
   const add = useCallback((item: Omit<CartItem, 'quantity'>, quantity = 1) => {
-    setItems((current) => {
-      const existing = current.find((i) => i.variantId === item.variantId);
-      if (existing) {
-        return current.map((i) =>
-          i.variantId === item.variantId
-            ? { ...i, ...item, quantity: Math.min(MAX_QTY, i.quantity + quantity) }
-            : i,
-        );
-      }
-      return [...current, { ...item, quantity: Math.min(MAX_QTY, Math.max(1, quantity)) }];
-    });
+    const current = getSnapshot();
+    const existing = current.find((i) => i.variantId === item.variantId);
+
+    write(
+      existing
+        ? current.map((i) =>
+            i.variantId === item.variantId
+              ? { ...i, ...item, quantity: Math.min(MAX_QTY, i.quantity + quantity) }
+              : i,
+          )
+        : [...current, { ...item, quantity: Math.min(MAX_QTY, Math.max(1, quantity)) }],
+    );
   }, []);
 
   const setQuantity = useCallback((variantId: string, quantity: number) => {
-    setItems((current) => {
-      if (quantity <= 0) return current.filter((i) => i.variantId !== variantId);
-      const clamped = Math.min(MAX_QTY, Math.floor(quantity));
-      return current.map((i) => (i.variantId === variantId ? { ...i, quantity: clamped } : i));
-    });
+    const current = getSnapshot();
+    if (quantity <= 0) {
+      write(current.filter((i) => i.variantId !== variantId));
+      return;
+    }
+    const clamped = Math.min(MAX_QTY, Math.floor(quantity));
+    write(current.map((i) => (i.variantId === variantId ? { ...i, quantity: clamped } : i)));
   }, []);
 
   const remove = useCallback((variantId: string) => {
-    setItems((current) => current.filter((i) => i.variantId !== variantId));
+    write(getSnapshot().filter((i) => i.variantId !== variantId));
   }, []);
 
-  const clear = useCallback(() => setItems([]), []);
+  const clear = useCallback(() => write(EMPTY), []);
 
   const value = useMemo<CartContextValue>(
     () => ({
@@ -160,7 +214,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       clear,
       hydrated,
     }),
-    [items, add, setQuantity, remove, clear, hydrated],
+    [items, hydrated, add, setQuantity, remove, clear],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

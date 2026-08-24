@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 
 import { useCart } from '@/components/cart/cart-provider';
@@ -27,20 +27,41 @@ type Reprice = PricingResult | { ok: false; issues: []; invalid: string };
 
 export function CartView() {
   const { items, setQuantity, remove, hydrated, indicativeSubtotalPaise } = useCart();
-  const [priced, setPriced] = useState<Reprice | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  useEffect(() => {
-    if (!hydrated || items.length === 0) {
-      setPriced(null);
-      return;
-    }
+  /**
+   * A pricing result is stored together with the cart it describes.
+   *
+   * Without this, quickly clicking "+" twice fires two overlapping repricings,
+   * and if the first resolves last the customer sees the total for the
+   * previous quantity. Tagging each result and discarding any that no longer
+   * matches the cart makes out-of-order responses harmless.
+   */
+  const signature = useMemo(
+    () => items.map((i) => `${i.variantId}:${i.quantity}`).join('|'),
+    [items],
+  );
 
+  const [entry, setEntry] = useState<{ signature: string; result: Reprice } | null>(null);
+
+  useEffect(() => {
+    if (!hydrated || items.length === 0) return;
+
+    let cancelled = false;
     const payload = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
+
     startTransition(async () => {
-      setPriced(await repriceCartAction(payload));
+      const result = await repriceCartAction(payload);
+      if (!cancelled) setEntry({ signature, result });
     });
-  }, [hydrated, items]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, items, signature]);
+
+  // Only trust a result that describes the cart as it stands right now.
+  const priced = entry && entry.signature === signature ? entry.result : null;
 
   // Nothing is rendered until localStorage has been read, so the server HTML
   // and the first client render agree.

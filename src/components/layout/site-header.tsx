@@ -46,10 +46,10 @@ export function SiteHeader({ logo }: { logo: ReactNode }) {
     return () => observer.disconnect();
   }, []);
 
-  // Close the mobile menu on navigation, or the new page renders behind it.
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
+  // The menu closes from the link's own onClick rather than from an effect
+  // watching `pathname`. Closing it is a consequence of the click, not of the
+  // route settling, and doing it here avoids a second render on every
+  // navigation whether or not the menu was ever open.
 
   // Escape closes the menu and returns focus to the button that opened it,
   // so keyboard users are not dropped at the top of the document.
@@ -165,6 +165,7 @@ export function SiteHeader({ logo }: { logo: ReactNode }) {
                     <Link
                       href={link.href}
                       aria-current={active ? 'page' : undefined}
+                      onClick={() => setMenuOpen(false)}
                       className={cn(
                         'block rounded-lg px-3 py-3 text-base font-medium transition-colors',
                         active ? 'bg-green-100 text-green-900' : 'text-stone-700 hover:bg-green-50',

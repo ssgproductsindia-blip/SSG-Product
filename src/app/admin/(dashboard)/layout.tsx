@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LayoutDashboard, LogOut, Package, Settings, ShoppingCart, Tag } from 'lucide-react';
+import { LayoutDashboard, LogOut, Package, ShoppingCart } from 'lucide-react';
 
 import { Logo } from '@/components/brand/logo';
 import { Button } from '@/components/ui/button';
@@ -14,12 +14,15 @@ import { requireAdmin } from '@/server/auth';
  * tree, not because someone remembered to add a check to it. Forgetting is
  * the normal failure mode; this removes the opportunity.
  */
+/**
+ * Only pages that exist are listed. A nav item pointing at an unbuilt route
+ * is a 404 the owner finds by clicking it, which reads as a broken admin
+ * rather than an unfinished one. Categories and Settings go in when built.
+ */
 const NAV = [
-  { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/admin/products', label: 'Products', icon: Package },
-  { href: '/admin/categories', label: 'Categories', icon: Tag },
-  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ] as const;
 
 export default async function AdminDashboardLayout({

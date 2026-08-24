@@ -95,10 +95,22 @@ function shape(raw: RawProduct): CatalogProduct {
   // RLS already filters inactive variants, but the flag is selected and
   // re-checked here so a future policy change cannot silently start listing
   // unpublished variants on the storefront.
-  const variants = raw.product_variants
+  const variants: CatalogVariant[] = raw.product_variants
     .filter((v) => v.is_active)
     .sort((a, b) => a.sort_order - b.sort_order)
-    .map(({ is_active: _ignored, ...v }) => v);
+    // Built explicitly rather than by spreading, so `is_active` cannot leak
+    // into the shape the storefront receives.
+    .map((v) => ({
+      id: v.id,
+      variant_name: v.variant_name,
+      quantity_value: v.quantity_value,
+      quantity_unit: v.quantity_unit,
+      mrp_paise: v.mrp_paise,
+      selling_price_paise: v.selling_price_paise,
+      sku: v.sku,
+      stock: v.stock,
+      sort_order: v.sort_order,
+    }));
 
   const images = raw.product_images
     .sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.sort_order - b.sort_order)

@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { PurchasePanel } from '@/components/catalog/purchase-panel';
-import { Reveal } from '@/components/ui/reveal';
 import { publicEnv } from '@/lib/env';
 import { getProductBySlug, listProducts, type CatalogProduct } from '@/server/catalog';
 
