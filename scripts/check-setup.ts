@@ -83,10 +83,16 @@ async function main() {
     'admin_users', 'product_bundles', 'bundle_items',
   ];
 
-  let missing: string[] = [];
+  // NOTE: do not use `{ head: true, count: 'exact' }` here. A HEAD request
+  // against a table that does not exist returns 204 with error === null, so
+  // the check passes for every missing table. A plain select returns the 404
+  // it should. This was a real false positive, not a hypothetical one.
+  const missing: string[] = [];
+  const present = new Set<string>();
   for (const table of tables) {
-    const { error } = await admin.from(table).select('*', { head: true, count: 'exact' }).limit(0);
+    const { error } = await admin.from(table).select('*').limit(1);
     if (error) missing.push(table);
+    else present.add(table);
   }
   record(
     `All ${tables.length} tables exist`,
@@ -162,6 +168,19 @@ async function main() {
   );
 
   for (const table of ['orders', 'customers', 'shipping_addresses', 'order_items', 'shipments']) {
+    // A table that does not exist also cannot be read, which would report as a
+    // PASS and mean nothing. Confirm the table is really there (service role)
+    // before treating an anon block as evidence that RLS is doing its job.
+    if (!present.has(table)) {
+      record(
+        `Public CANNOT read ${table}`,
+        false,
+        'cannot verify — the table does not exist yet, so this proves nothing',
+        true,
+      );
+      continue;
+    }
+
     const { data, error } = await anon.from(table).select('*').limit(1);
     // Blocked correctly = an RLS error, or an empty result with no rows leaked.
     const blocked = Boolean(error) || (data?.length ?? 0) === 0;
