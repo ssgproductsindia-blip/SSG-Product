@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "create-admin": "tsx scripts/create-admin.ts",
-    "check-setup": "tsx scripts/check-setup.ts"
+    "check-setup": "tsx scripts/check-setup.ts",
+    "verify-orders": "tsx scripts/verify-order-flow.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",
