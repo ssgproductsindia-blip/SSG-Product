@@ -22,6 +22,16 @@ const publicSchema = z.object({
     message: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is missing. Copy it from Supabase → Project Settings → API.',
   }),
   NEXT_PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+
+  // Razorpay's Key ID is not a secret — it is meant to be embedded in the
+  // client-side Checkout widget, the same way a Stripe publishable key is.
+  // Only the Key SECRET (server-only, below) can create charges or sign
+  // anything; this one alone cannot. It is declared here, separately from
+  // RAZORPAY_KEY_ID in the server schema, because a browser bundle and a
+  // server action are different compilation contexts — there is no way to
+  // share one env var across both without the NEXT_PUBLIC_ prefix, so the
+  // two are set to the SAME value in .env.local, deliberately duplicated.
+  NEXT_PUBLIC_RAZORPAY_KEY_ID: z.string().optional(),
 });
 
 /**
@@ -35,6 +45,7 @@ export const publicEnv = publicSchema.parse({
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+  NEXT_PUBLIC_RAZORPAY_KEY_ID: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
 });
 
 const serverSchema = z.object({
@@ -89,7 +100,21 @@ export function emailConfigured(): boolean {
   return Boolean(env.RESEND_API_KEY && env.ORDER_EMAIL_FROM);
 }
 
+/**
+ * True only when the server can both create a Razorpay order (KEY_ID +
+ * KEY_SECRET) and the browser has the matching public key to open the
+ * Checkout widget for it. Requiring the public key here too, and requiring
+ * it to be the SAME value as the server one, catches the classic
+ * misconfiguration of setting one and forgetting the other — that failure
+ * mode would otherwise surface as a confusing widget error deep into
+ * checkout instead of a clean "payments not configured" state up front.
+ */
 export function paymentsConfigured(): boolean {
   const env = serverEnv();
-  return Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
+  return Boolean(
+    env.RAZORPAY_KEY_ID &&
+      env.RAZORPAY_KEY_SECRET &&
+      publicEnv.NEXT_PUBLIC_RAZORPAY_KEY_ID &&
+      publicEnv.NEXT_PUBLIC_RAZORPAY_KEY_ID === env.RAZORPAY_KEY_ID,
+  );
 }

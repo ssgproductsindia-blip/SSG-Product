@@ -74,6 +74,20 @@ export type CartLineInput = z.infer<typeof cartLineSchema>;
 // Checkout
 // ---------------------------------------------------------------------------
 
+/**
+ * Proof of payment returned by the Razorpay Checkout widget after a
+ * successful payment. Validated for shape only here — the values are not
+ * trustworthy until verifyPaymentSignature() (src/lib/payments/razorpay.ts)
+ * confirms the signature was produced with the account's own key secret.
+ * Nothing in this schema makes a claim true; it only makes a malformed
+ * request fail before it reaches that check.
+ */
+export const paymentProofSchema = z.object({
+  razorpayOrderId: z.string().trim().min(1).max(64),
+  razorpayPaymentId: z.string().trim().min(1).max(64),
+  razorpaySignature: z.string().trim().min(1).max(256),
+});
+
 export const checkoutSchema = z.object({
   customer: z.object({
     name: z.string().trim().min(2, 'Enter your full name.').max(120),
@@ -89,6 +103,8 @@ export const checkoutSchema = z.object({
   }),
   items: cartSchema,
   notes: z.string().trim().max(500).optional(),
+  /** Present only when payments are enabled and the customer already paid. */
+  payment: paymentProofSchema.optional(),
 });
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;

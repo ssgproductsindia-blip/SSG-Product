@@ -2,13 +2,19 @@
 
 import { headers } from 'next/headers';
 
-import { publicEnv } from '@/lib/env';
+import { paymentsConfigured, publicEnv } from '@/lib/env';
 import { clientKey, rateLimit } from '@/lib/rate-limit';
-import { checkoutSchema } from '@/lib/validation';
+import {
+  createRazorpayOrder,
+  fetchRazorpayOrderAmount,
+  verifyPaymentSignature,
+} from '@/lib/payments/razorpay';
+import { cartSchema, checkoutSchema } from '@/lib/validation';
 import { orderConfirmationEmail } from '@/lib/email/templates';
 import { sendOrderEmail } from '@/lib/email/send';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { priceCart } from '@/server/pricing';
 
 /**
  * Place an order.
@@ -18,6 +24,13 @@ import { createServiceClient } from '@/lib/supabase/service';
  * items, snapshots and address inside one transaction with the variant rows
  * locked. Nothing this function receives from the browser influences a price —
  * the payload carries variant ids and quantities only.
+ *
+ * When Razorpay is configured, this function additionally REQUIRES a verified
+ * payment before it will call create_order at all (see the `payment` branch
+ * below) — an abandoned or failed checkout never creates an order, never
+ * touches stock, and leaves nothing to clean up. When Razorpay is not
+ * configured, behaviour is exactly what it was before payments existed:
+ * order is created immediately, payment_status stays 'pending'.
  *
  * The confirmation email is deliberately sent AFTER the transaction commits,
  * and is deliberately not allowed to fail the order. An order that exists but
@@ -65,11 +78,72 @@ function describeOrderError(message: string): string {
   return 'We could not place your order. Please try again in a moment.';
 }
 
+// ---------------------------------------------------------------------------
+// Step 1 (payments only): create a Razorpay order for the server-priced cart
+// ---------------------------------------------------------------------------
+
+export type CreatePaymentOrderResult =
+  | { ok: true; razorpayOrderId: string; amountPaise: number; keyId: string }
+  | { ok: false; error: string };
+
+/**
+ * Called before the Razorpay Checkout widget opens. Prices the cart from the
+ * database — never from anything the browser sent — and asks Razorpay to
+ * create an order for that exact figure. No SSG order exists yet at this
+ * point; that only happens once a payment against this Razorpay order has
+ * been verified, in placeOrderAction below.
+ */
+export async function createPaymentOrderAction(items: unknown): Promise<CreatePaymentOrderResult> {
+  if (!paymentsConfigured()) {
+    return { ok: false, error: 'Online payment is not enabled.' };
+  }
+
+  const requestHeaders = await headers();
+  const limit = rateLimit(clientKey(requestHeaders, 'razorpay-order'), {
+    limit: 12,
+    windowMs: 10 * 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return {
+      ok: false,
+      error: `Too many attempts. Please wait ${limit.retryAfter} seconds and try again.`,
+    };
+  }
+
+  const parsedItems = cartSchema.safeParse(items);
+  if (!parsedItems.success) {
+    return { ok: false, error: parsedItems.error.issues[0]?.message ?? 'Your cart looks invalid.' };
+  }
+
+  const priced = await priceCart(parsedItems.data);
+  if (!priced.ok) {
+    return {
+      ok: false,
+      error: priced.issues[0]?.message ?? 'Could not price your cart. Please refresh and try again.',
+    };
+  }
+
+  const receipt = `cart-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await createRazorpayOrder(priced.totalPaise, receipt);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  return {
+    ok: true,
+    razorpayOrderId: result.razorpayOrderId,
+    amountPaise: result.amountPaise,
+    // Safe to hand to the client: this is the public key, not the secret —
+    // see the note on NEXT_PUBLIC_RAZORPAY_KEY_ID in src/lib/env.ts.
+    keyId: publicEnv.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: place the order (guest checkout, or after a verified payment)
+// ---------------------------------------------------------------------------
+
 export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult> {
   const requestHeaders = await headers();
 
-  // Order creation writes rows and decrements stock, so it is worth limiting
-  // even loosely. See the honest caveats in src/lib/rate-limit.ts.
   const limit = rateLimit(clientKey(requestHeaders, 'checkout'), {
     limit: 10,
     windowMs: 10 * 60 * 1000,
@@ -92,7 +166,46 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     return { ok: false, error: 'Please check the highlighted fields.', fieldErrors };
   }
 
-  const { customer, shipping, items, notes } = parsed.data;
+  const { customer, shipping, items, notes, payment } = parsed.data;
+  const paymentsOn = paymentsConfigured();
+
+  // ---- Payment verification, when Razorpay is on -------------------------
+  // This is the entire gate. If payments are configured, an order can only
+  // ever be created downstream of a signature that verifies — never from a
+  // client claiming "I paid", regardless of what the request body says.
+  let paymentFields: {
+    payment_status: 'paid';
+    payment_provider: 'razorpay';
+    payment_reference: string;
+    razorpay_order_id: string;
+  } | null = null;
+
+  if (paymentsOn) {
+    if (!payment) {
+      return { ok: false, error: 'Payment is required to place this order.' };
+    }
+
+    const verified = verifyPaymentSignature({
+      razorpayOrderId: payment.razorpayOrderId,
+      razorpayPaymentId: payment.razorpayPaymentId,
+      razorpaySignature: payment.razorpaySignature,
+    });
+
+    if (!verified) {
+      return {
+        ok: false,
+        error:
+          'We could not verify your payment. If an amount was deducted, please contact us with your payment reference before trying again.',
+      };
+    }
+
+    paymentFields = {
+      payment_status: 'paid',
+      payment_provider: 'razorpay',
+      payment_reference: payment.razorpayPaymentId,
+      razorpay_order_id: payment.razorpayOrderId,
+    };
+  }
 
   // Resolve the buyer's identity from their own session cookie, never from
   // anything the client submitted in the payload. This is what makes
@@ -118,9 +231,50 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     p_items: items.map((i) => ({ variant_id: i.variantId, quantity: i.quantity })),
     p_notes: notes ?? null,
     p_auth_user_id: sessionUser?.id ?? null,
+    ...(paymentFields
+      ? {
+          p_payment_status: paymentFields.payment_status,
+          p_payment_provider: paymentFields.payment_provider,
+          p_payment_reference: paymentFields.payment_reference,
+          p_razorpay_order_id: paymentFields.razorpay_order_id,
+        }
+      : {}),
   } as never);
 
   if (error) {
+    // The customer already paid and the order still failed to create — this
+    // is not an ordinary "out of stock, please retry" failure, it is a
+    // captured payment with nothing to show for it. That must never be
+    // reported with the same wording as a routine failure, and it must never
+    // be allowed to vanish unrecorded: an admin needs to see this and
+    // refund or manually fulfil it.
+    if (paymentFields) {
+      try {
+        await supabase.from('admin_audit_logs').insert({
+          admin_user_id: null,
+          admin_email: null,
+          action: 'payment.captured_without_order',
+          entity_type: 'razorpay_payment',
+          entity_id: paymentFields.payment_reference,
+          metadata: {
+            razorpay_order_id: paymentFields.razorpay_order_id,
+            customer_email: customer.email,
+            customer_phone: customer.phone,
+            reason: error.message,
+          },
+        });
+      } catch {
+        // Even the audit write failing must not hide the underlying problem
+        // from the customer — the message below still tells them plainly.
+      }
+
+      return {
+        ok: false,
+        error:
+          'Your payment was successful, but we could not complete your order automatically. We have been notified and will contact you shortly — please keep your payment confirmation.',
+      };
+    }
+
     return { ok: false, error: describeOrderError(error.message) };
   }
 
@@ -132,6 +286,35 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     shipping_paise: number;
     total_paise: number;
   };
+
+  // ---- Reconciliation: does what was paid match what was charged? --------
+  // The signature only proves this payment belongs to that Razorpay order —
+  // not that nothing about pricing changed in the seconds between creating
+  // the Razorpay order and create_order's own independent repricing (a
+  // concurrent admin price edit, most plausibly). The order still stands
+  // either way — the customer already paid and denying them the product over
+  // a race condition would be worse — but a mismatch is flagged for a human
+  // rather than silently ignored.
+  if (paymentFields) {
+    const paidAmount = await fetchRazorpayOrderAmount(paymentFields.razorpay_order_id);
+    if (paidAmount !== null && paidAmount !== result.total_paise) {
+      try {
+        await supabase.from('admin_audit_logs').insert({
+          action: 'payment.amount_mismatch',
+          entity_type: 'order',
+          entity_id: result.order_id,
+          metadata: {
+            paid_paise: paidAmount,
+            charged_paise: result.total_paise,
+            razorpay_payment_id: paymentFields.payment_reference,
+          },
+        });
+      } catch {
+        // Non-fatal — the order already exists and is paid; this is purely
+        // a bookkeeping flag for later reconciliation.
+      }
+    }
+  }
 
   // ---- Confirmation email -------------------------------------------------
   // Past the point of no return: the order exists. Any failure below is

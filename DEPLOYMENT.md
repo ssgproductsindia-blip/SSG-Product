@@ -125,14 +125,42 @@ of a false success.
 
 ## 8. Payments (Razorpay) — optional
 
-Without Razorpay keys, payments are **off**: orders are created with
-`payment_status = 'pending'` and the customer is told plainly that payment has
-not been collected. Nothing is ever reported as paid without a server-verified
-signature.
+Without all of the values below set, payments are **off**: checkout skips the
+Razorpay widget entirely, orders are created with `payment_status = 'pending'`,
+and the customer is told plainly that payment has not been collected. Nothing
+is ever reported as paid without a server-verified signature.
 
-When you are ready: Razorpay dashboard → **Settings → API Keys**, then add
-`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and the webhook secret from
-**Settings → Webhooks** (point it at `https://yourdomain.com/api/razorpay/webhook`).
+1. Razorpay dashboard → toggle **Test Mode** (top left) → **Settings → API
+   Keys** → generate a key. No KYC needed for test mode.
+2. Add to `.env.local`, **all four together**:
+
+   ```
+   RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+   NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_xxxxxxxx
+   RAZORPAY_KEY_SECRET=xxxxxxxxxxxxxxxx
+   RAZORPAY_WEBHOOK_SECRET=
+   ```
+
+   `RAZORPAY_KEY_ID` and `NEXT_PUBLIC_RAZORPAY_KEY_ID` are the **same value**,
+   set twice. The Key ID is not secret — it is meant to be embedded in the
+   Checkout widget in the browser — but a server action and client-side code
+   are different compilation contexts, so it needs the `NEXT_PUBLIC_` copy to
+   reach the browser at all. `paymentsConfigured()` checks both copies are
+   present and equal, specifically to catch updating one and forgetting the
+   other.
+
+3. Leave `RAZORPAY_WEBHOOK_SECRET` blank for now — it needs a public HTTPS
+   URL to register, so it comes after deployment (step 9 below), not during
+   local development. Payments still work locally without it: the webhook is
+   reconciliation for the rare case where a customer's tab closes right after
+   paying but before the order finishes writing, not the primary path.
+4. After deploying: Razorpay dashboard → **Settings → Webhooks** → add
+   `https://yourdomain.com/api/razorpay/webhook`, subscribe to
+   `payment.captured` and `payment.failed`, then copy the webhook secret it
+   generates into `RAZORPAY_WEBHOOK_SECRET` in Vercel and redeploy.
+5. When ready for real payments, switch the dashboard out of Test Mode,
+   generate live keys, and replace all three values (Key ID in both places)
+   with the live ones. Test-mode and live-mode keys cannot be mixed.
 
 ---
 
@@ -169,6 +197,14 @@ Work through these against the live site:
 - [ ] Changing a price in admin updates the storefront, and the existing test
       order still shows the price it was placed at
 - [ ] Site is usable at 360px width
+- [ ] If Razorpay is configured: a test-mode payment (card `4111 1111 1111
+      1111`, any future expiry/CVV) completes the Checkout widget and the
+      resulting order shows `payment_status = paid` with a
+      `razorpay_order_id` set
+- [ ] Closing the Razorpay widget without paying leaves no order behind at all
+- [ ] A test-mode webhook (Razorpay dashboard → Webhooks → send test event)
+      is accepted with a 200; the same request replayed does not change
+      anything the second time
 
 ## 12. Rotating a leaked key
 

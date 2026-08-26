@@ -107,6 +107,8 @@ export type OrderRow = Timestamps & {
   notes: string | null;
   /** Set only when the buyer was signed in at checkout. Null for guest orders. */
   auth_user_id: string | null;
+  /** Razorpay's own order id, set only when a Razorpay payment was initiated. */
+  razorpay_order_id: string | null;
 }
 
 export type ProfileRow = Timestamps & {
@@ -326,6 +328,10 @@ export type Database = {
           p_items: { variant_id: string; quantity: number }[];
           p_notes: string | null;
           p_auth_user_id?: string | null;
+          p_payment_status?: PaymentStatus;
+          p_payment_provider?: string | null;
+          p_payment_reference?: string | null;
+          p_razorpay_order_id?: string | null;
         };
         Returns: unknown;
       };

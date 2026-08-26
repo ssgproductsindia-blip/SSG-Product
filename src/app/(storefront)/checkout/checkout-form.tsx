@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Script from 'next/script';
 import { useEffect, useState } from 'react';
 
 import { useCart } from '@/components/cart/cart-provider';
 import { Button } from '@/components/ui/button';
 import { formatPaise } from '@/lib/money';
-import { placeOrderAction } from '@/server/actions/checkout-actions';
+import { createPaymentOrderAction, placeOrderAction } from '@/server/actions/checkout-actions';
 import { Field, TextAreaField } from '@/components/forms/field';
 
 /**
@@ -26,6 +27,14 @@ import { Field, TextAreaField } from '@/components/forms/field';
  * prefill fields and offer a saved-address picker, but every field stays
  * editable and nothing here requires an account. A guest sees exactly the
  * form that existed before accounts did.
+ *
+ * When Razorpay is enabled, submitting does not place the order directly.
+ * It first asks the server to price the cart and open a Razorpay order
+ * (createPaymentOrderAction), then opens Razorpay's own Checkout widget for
+ * that amount. Only the widget's own success callback — carrying a payment id
+ * and a signature the server verifies — leads to placeOrderAction actually
+ * being called. Closing the widget, or a failed payment, leaves no order
+ * behind at all.
  */
 
 type FieldErrors = Record<string, string>;
@@ -49,6 +58,39 @@ type CheckoutFormProps = {
   addresses?: SavedAddress[];
 };
 
+/**
+ * The shape actually used from Razorpay's `window.Razorpay` global, injected
+ * by the checkout.js script loaded below. No official/maintained @types
+ * package exists for it; declaring only what this file calls is safer than
+ * pulling in an unofficial community package for a handful of fields.
+ */
+type RazorpaySuccessResponse = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayInstance = { open: () => void };
+
+type RazorpayOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  order_id: string;
+  name: string;
+  description?: string;
+  prefill?: { name?: string; email?: string; contact?: string };
+  theme?: { color?: string };
+  handler: (response: RazorpaySuccessResponse) => void;
+  modal?: { ondismiss?: () => void };
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayOptions) => RazorpayInstance;
+  }
+}
+
 export function CheckoutForm({
   paymentsEnabled,
   customer = null,
@@ -58,8 +100,10 @@ export function CheckoutForm({
   const { items, hydrated, indicativeSubtotalPaise, clear } = useCart();
 
   const [submitting, setSubmitting] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [razorpayReady, setRazorpayReady] = useState(false);
 
   const defaultAddress = addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
   const [selectedAddressId, setSelectedAddressId] = useState(defaultAddress?.id ?? '');
@@ -81,38 +125,34 @@ export function CheckoutForm({
     return null;
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setFormError(null);
-    setFieldErrors({});
-
-    const form = new FormData(event.currentTarget);
-    const value = (name: string) => String(form.get(name) ?? '').trim();
-
+  /** Everything after a verified (or unpaid, when payments are off) submit. */
+  async function completeOrder(
+    checkoutFields: Record<string, string>,
+    payment?: { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string },
+  ) {
     const result = await placeOrderAction({
       customer: {
-        name: value('name'),
-        email: value('email'),
-        phone: value('phone'),
+        name: checkoutFields.name,
+        email: checkoutFields.email,
+        phone: checkoutFields.phone,
       },
       shipping: {
-        address: value('address'),
-        city: value('city'),
-        state: value('state'),
-        postalCode: value('postalCode'),
-        country: value('country') || 'India',
+        address: checkoutFields.address,
+        city: checkoutFields.city,
+        state: checkoutFields.state,
+        postalCode: checkoutFields.postalCode,
+        country: checkoutFields.country || 'India',
       },
       items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
-      notes: value('notes') || undefined,
+      notes: checkoutFields.notes || undefined,
+      ...(payment ? { payment } : {}),
     });
 
     if (!result.ok) {
       setFormError(result.error);
       setFieldErrors(result.fieldErrors ?? {});
       setSubmitting(false);
-      // Move focus to the error so it is announced rather than silently
-      // appearing above the fold.
+      setStatusMessage(null);
       document.getElementById('checkout-error')?.focus();
       return;
     }
@@ -120,7 +160,6 @@ export function CheckoutForm({
     // Only clear once the order is definitely written. Clearing optimistically
     // would destroy the cart if the call had failed.
     clear();
-    const email = value('email');
     router.push(
       `/order/confirmed?order=${encodeURIComponent(result.orderNumber)}` +
         `&email=${result.emailSent ? '1' : '0'}` +
@@ -128,12 +167,90 @@ export function CheckoutForm({
         // order" only to guests — a signed-in buyer's order is already
         // linked to their account, so the prompt would be redundant.
         `&guest=${result.authenticated ? '0' : '1'}` +
-        (result.authenticated ? '' : `&e=${encodeURIComponent(email)}`),
+        (result.authenticated ? '' : `&e=${encodeURIComponent(checkoutFields.email)}`),
     );
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setFormError(null);
+    setFieldErrors({});
+    setStatusMessage(null);
+
+    const form = new FormData(event.currentTarget);
+    const fields: Record<string, string> = {};
+    for (const key of ['name', 'email', 'phone', 'address', 'city', 'state', 'postalCode', 'country', 'notes']) {
+      fields[key] = String(form.get(key) ?? '').trim();
+    }
+
+    if (!paymentsEnabled) {
+      await completeOrder(fields);
+      return;
+    }
+
+    // ---- Paid checkout: get a Razorpay order for the server-priced cart ---
+    if (!window.Razorpay) {
+      setFormError('Payment could not load. Please refresh the page and try again.');
+      setSubmitting(false);
+      return;
+    }
+
+    setStatusMessage('Preparing secure payment…');
+    const paymentOrder = await createPaymentOrderAction(
+      items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+    );
+
+    if (!paymentOrder.ok) {
+      setFormError(paymentOrder.error);
+      setSubmitting(false);
+      setStatusMessage(null);
+      return;
+    }
+
+    setStatusMessage(null);
+
+    const razorpay = new window.Razorpay({
+      key: paymentOrder.keyId,
+      amount: paymentOrder.amountPaise,
+      currency: 'INR',
+      order_id: paymentOrder.razorpayOrderId,
+      name: 'SSG Products',
+      description: 'Order payment',
+      prefill: { name: fields.name, email: fields.email, contact: fields.phone },
+      theme: { color: '#3d7a2f' },
+      handler: (response) => {
+        setStatusMessage('Payment received — confirming your order…');
+        void completeOrder(fields, {
+          razorpayOrderId: response.razorpay_order_id,
+          razorpayPaymentId: response.razorpay_payment_id,
+          razorpaySignature: response.razorpay_signature,
+        });
+      },
+      modal: {
+        // Fires when the customer closes the widget without paying. No order
+        // was ever created — there is nothing to undo, only the button to
+        // re-enable.
+        ondismiss: () => {
+          setSubmitting(false);
+          setStatusMessage(null);
+        },
+      },
+    });
+
+    razorpay.open();
   }
 
   return (
     <form onSubmit={handleSubmit} noValidate className="grid gap-10 lg:grid-cols-[1fr_22rem] lg:gap-14">
+      {paymentsEnabled ? (
+        <Script
+          src="https://checkout.razorpay.com/v1/checkout.js"
+          strategy="afterInteractive"
+          onLoad={() => setRazorpayReady(true)}
+        />
+      ) : null}
+
       <div>
         {formError ? (
           <p
@@ -328,8 +445,20 @@ export function CheckoutForm({
             </p>
           ) : null}
 
-          <Button type="submit" size="lg" full className="mt-6" disabled={submitting}>
-            {submitting ? 'Placing order…' : 'Place order'}
+          <Button
+            type="submit"
+            size="lg"
+            full
+            className="mt-6"
+            disabled={submitting || (paymentsEnabled && !razorpayReady)}
+          >
+            {statusMessage
+              ? statusMessage
+              : submitting
+                ? 'Placing order…'
+                : paymentsEnabled
+                  ? 'Proceed to payment'
+                  : 'Place order'}
           </Button>
 
           {!customer ? (
