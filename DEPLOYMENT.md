@@ -107,11 +107,43 @@ Then sign in at `/admin/login`.
 
 ## 7. Email (Resend) — optional, enables order emails
 
-1. [resend.com](https://resend.com) → add and **verify your sending domain**
-   (add the DNS records they give you). Sending from an unverified domain is
-   rejected.
-2. Create an API key.
-3. Add to `.env.local`:
+Until these are set, orders are still created and stored correctly — the admin
+just sees *"Tracking saved, but the customer email could not be sent"* instead
+of a false success.
+
+1. [resend.com/signup](https://resend.com/signup) → sign up.
+2. Dashboard → **API Keys** → **Create API Key** → name it, "Sending access"
+   permission is enough → copy it now, it is shown once.
+3. Choose one of the two setups below.
+
+### Option A — no domain yet (test mode)
+
+```
+RESEND_API_KEY=re_xxxxxxxx
+ORDER_EMAIL_FROM=SSG Products <onboarding@resend.dev>
+```
+
+`onboarding@resend.dev` needs no domain setup and works immediately. The
+limitation is real and not a bug if you hit it: **it can only deliver to the
+email address you signed up to Resend with.** Sending to any other address
+returns
+
+> You can only send testing emails to your own email address. To send emails
+> to other recipients, please verify a domain at resend.com/domains…
+
+which surfaces in this app as `describeOutcome`'s honest "the customer email
+could NOT be sent" message, not a silent failure. Good enough to prove the
+whole flow works end to end (place an order using your own Resend sign-up
+email as the customer email, save tracking, watch the email arrive) — not
+good enough to email real customers. Move to Option B before launch.
+
+### Option B — real domain (required before launch)
+
+1. Resend dashboard → **Domains** → **Add Domain** → enter your domain.
+2. Add the DNS records Resend gives you (SPF/DKIM, as TXT/CNAME records) at
+   your domain registrar or DNS host. Propagation can take a few minutes to a
+   few hours.
+3. Once Resend shows the domain as **Verified**:
 
 ```
 RESEND_API_KEY=re_xxxxxxxx
@@ -119,9 +151,7 @@ ORDER_EMAIL_FROM=SSG Products <orders@yourdomain.com>
 ORDER_EMAIL_BCC=your@email.com
 ```
 
-Until these are set, orders are still created and stored correctly — the admin
-just sees *"Tracking saved, but the customer email could not be sent"* instead
-of a false success.
+Sending from an unverified domain is rejected by Resend outright.
 
 ## 8. Payments (Razorpay) — optional
 
