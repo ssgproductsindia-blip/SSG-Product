@@ -24,6 +24,7 @@ type Row = {
     is_active: boolean;
   }[];
   product_images: { id: string }[];
+  categories: { name: string } | null;
 };
 
 export default async function AdminProductsPage({
@@ -42,7 +43,8 @@ export default async function AdminProductsPage({
     .select(
       `id, name, slug, is_active, is_featured, sort_order,
        product_variants ( id, variant_name, mrp_paise, selling_price_paise, stock, is_active ),
-       product_images ( id )`,
+       product_images ( id ),
+       categories ( name )`,
     )
     .order('sort_order', { ascending: true });
 
@@ -136,7 +138,10 @@ export default async function AdminProductsPage({
                 >
                   <div className="min-w-48 flex-1">
                     <p className="font-medium text-earth-900">{product.name}</p>
-                    <p className="text-xs text-stone-500">/{product.slug}</p>
+                    <p className="text-xs text-stone-500">
+                      /{product.slug}
+                      {product.categories ? ` · ${product.categories.name}` : ''}
+                    </p>
                   </div>
 
                   <div className="text-sm tabular-nums text-stone-700">

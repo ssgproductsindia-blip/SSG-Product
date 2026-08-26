@@ -1,8 +1,25 @@
 import Link from 'next/link';
 
-import { ProductForm } from '../product-form';
+import { createClient } from '@/lib/supabase/server';
 
-export default function NewProductPage() {
+import { ProductForm, type CategoryOption } from '../product-form';
+
+export const dynamic = 'force-dynamic';
+
+export default async function NewProductPage() {
+  const supabase = await createClient();
+
+  // All categories, not only active ones — an admin picking a category for a
+  // brand-new product has no "currently assigned" category to preserve, but
+  // fetching the same way as the edit page keeps this one query shape instead
+  // of two slightly different ones to maintain.
+  const { data } = await supabase
+    .from('categories')
+    .select('id, name, is_active')
+    .order('sort_order', { ascending: true });
+
+  const categories = (data ?? []) as CategoryOption[];
+
   return (
     <div className="mx-auto max-w-3xl">
       <nav aria-label="Breadcrumb" className="mb-6 text-sm">
@@ -18,7 +35,7 @@ export default function NewProductPage() {
       </p>
 
       <div className="mt-8">
-        <ProductForm />
+        <ProductForm categories={categories} />
       </div>
     </div>
   );

@@ -3,9 +3,11 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { CheckboxField, Field, TextAreaField } from '@/components/admin/field';
+import { CheckboxField, Field, SelectField, TextAreaField } from '@/components/admin/field';
 import { Button } from '@/components/ui/button';
 import { saveProductAction } from '@/server/actions/product-actions';
+
+export type CategoryOption = { id: string; name: string; is_active: boolean };
 
 /**
  * Product create/edit form.
@@ -20,6 +22,7 @@ export type ProductFormValues = {
   id?: string;
   name: string;
   slug: string;
+  categoryId: string | null;
   shortDescription: string;
   description: string;
   ingredients: string[];
@@ -35,6 +38,7 @@ export type ProductFormValues = {
 const EMPTY: ProductFormValues = {
   name: '',
   slug: '',
+  categoryId: null,
   shortDescription: '',
   description: '',
   ingredients: [],
@@ -56,7 +60,13 @@ function slugify(value: string) {
     .slice(0, 80);
 }
 
-export function ProductForm({ initial }: { initial?: ProductFormValues }) {
+export function ProductForm({
+  initial,
+  categories = [],
+}: {
+  initial?: ProductFormValues;
+  categories?: CategoryOption[];
+}) {
   const router = useRouter();
   const values = initial ?? EMPTY;
   const isNew = !values.id;
@@ -80,9 +90,12 @@ export function ProductForm({ initial }: { initial?: ProductFormValues }) {
     const form = new FormData(event.currentTarget);
     const text = (name: string) => String(form.get(name) ?? '').trim();
 
+    const categoryIdRaw = text('categoryId');
+
     const result = await saveProductAction(values.id ?? null, {
       name: text('name'),
       slug: text('slug'),
+      categoryId: categoryIdRaw || null,
       shortDescription: text('shortDescription'),
       description: text('description'),
       ingredients: String(form.get('ingredients') ?? ''),
@@ -154,6 +167,23 @@ export function ProductForm({ initial }: { initial?: ProductFormValues }) {
             error={fieldErrors.slug}
             className="sm:col-span-2"
           />
+          <SelectField
+            name="categoryId"
+            label="Category"
+            optional
+            defaultValue={values.categoryId ?? ''}
+            error={fieldErrors.categoryId}
+            hint="Optional — products don't need one to be sold."
+            className="sm:col-span-2"
+          >
+            <option value="">No category</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+                {!category.is_active ? ' (archived)' : ''}
+              </option>
+            ))}
+          </SelectField>
           <TextAreaField
             name="shortDescription"
             label="Short description"

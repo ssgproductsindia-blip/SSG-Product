@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/server';
 import { imageUrl } from '@/server/catalog';
 
-import { ProductForm, type ProductFormValues } from '../product-form';
+import { ProductForm, type CategoryOption, type ProductFormValues } from '../product-form';
 import { ImagesEditor, type ImageRow } from './images-editor';
 import { VariantsEditor, type VariantRow } from './variants-editor';
 
@@ -19,24 +19,34 @@ export default async function EditProductPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from('products')
-    .select(
-      `id, name, slug, short_description, description, ingredients, benefits,
-       usage_instructions, seo_title, seo_description, is_active, is_featured, sort_order,
-       product_variants ( id, variant_name, quantity_value, quantity_unit, mrp_paise,
-                          selling_price_paise, sku, stock, is_active, sort_order ),
-       product_images ( id, storage_path, alt_text, is_primary, sort_order )`,
-    )
-    .eq('id', id)
-    .maybeSingle();
+  const [{ data, error }, { data: categoryData }] = await Promise.all([
+    supabase
+      .from('products')
+      .select(
+        `id, name, slug, category_id, short_description, description, ingredients, benefits,
+         usage_instructions, seo_title, seo_description, is_active, is_featured, sort_order,
+         product_variants ( id, variant_name, quantity_value, quantity_unit, mrp_paise,
+                            selling_price_paise, sku, stock, is_active, sort_order ),
+         product_images ( id, storage_path, alt_text, is_primary, sort_order )`,
+      )
+      .eq('id', id)
+      .maybeSingle(),
+    // All categories, not only active ones — if this product is already
+    // assigned to a category that has since been archived, that option must
+    // still appear (clearly labelled) or saving the form with no other
+    // change would silently detach it. See product-form.tsx's SelectField.
+    supabase.from('categories').select('id, name, is_active').order('sort_order', { ascending: true }),
+  ]);
 
   if (error || !data) notFound();
+
+  const categories = (categoryData ?? []) as CategoryOption[];
 
   const product = data as unknown as {
     id: string;
     name: string;
     slug: string;
+    category_id: string | null;
     short_description: string | null;
     description: string | null;
     ingredients: string[];
@@ -53,6 +63,7 @@ export default async function EditProductPage({
 
   const initial: ProductFormValues = {
     id: product.id,
+    categoryId: product.category_id,
     name: product.name,
     slug: product.slug,
     shortDescription: product.short_description ?? '',
@@ -117,7 +128,7 @@ export default async function EditProductPage({
       <div className="mt-8 space-y-8">
         <VariantsEditor productId={product.id} variants={variants} />
         <ImagesEditor productId={product.id} images={images} productName={product.name} />
-        <ProductForm initial={initial} />
+        <ProductForm initial={initial} categories={categories} />
       </div>
     </div>
   );

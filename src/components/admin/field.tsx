@@ -1,6 +1,6 @@
 'use client';
 
-import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -100,6 +100,42 @@ export function TextAreaField({
         className={cn('mt-1.5', inputClasses(error))}
         {...rest}
       />
+      {error ? <ErrorText name={name}>{error}</ErrorText> : null}
+    </div>
+  );
+}
+
+export function SelectField({
+  name,
+  label,
+  error,
+  hint,
+  optional,
+  className,
+  children,
+  ...rest
+}: BaseProps &
+  Omit<SelectHTMLAttributes<HTMLSelectElement>, 'name' | 'className'> & {
+    children: React.ReactNode;
+  }) {
+  const describedBy = [hint ? `${name}-hint` : null, error ? `${name}-error` : null]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className={className}>
+      <Label name={name} label={label} optional={optional} />
+      {hint ? <Hint name={name}>{hint}</Hint> : null}
+      <select
+        id={name}
+        name={name}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        className={cn('mt-1.5', inputClasses(error))}
+        {...rest}
+      >
+        {children}
+      </select>
       {error ? <ErrorText name={name}>{error}</ErrorText> : null}
     </div>
   );
