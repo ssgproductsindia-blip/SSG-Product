@@ -18,11 +18,6 @@ import { requireAdmin } from '@/server/auth';
  * Categories and Settings are omitted until they exist — a nav item pointing
  * at an unbuilt route is a 404 the owner finds by clicking it, which reads as
  * a broken admin rather than an unfinished one.
- *
- * Orders is listed but NOT yet built, so it currently 404s. It is kept here
- * deliberately: the dashboard already links to it from every order row, so
- * hiding it from the nav would conceal a dead link rather than remove one.
- * Remove this note when /admin/orders lands.
  */
 const NAV = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },

@@ -336,6 +336,7 @@ export type Database = {
         Returns: unknown;
       };
       is_admin: { Args: Record<never, never>; Returns: boolean };
+      cancel_order: { Args: { p_order_id: string }; Returns: unknown };
     };
     Enums: {
       order_status: OrderStatus;
