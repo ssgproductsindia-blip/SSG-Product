@@ -3,8 +3,9 @@ import { join } from 'node:path';
 
 import Image from 'next/image';
 
-import { BRAND } from '@/lib/brand';
+import { BRAND, brandAssetUrl } from '@/lib/brand';
 import { cn } from '@/lib/utils';
+import { getStoreSettings } from '@/server/catalog';
 
 /**
  * The SSG Products logo.
@@ -14,30 +15,26 @@ import { cn } from '@/lib/utils';
  * transparent PNG). The brief is explicit that it must not be redesigned, so
  * this component renders the actual file and nothing else.
  *
- * Until that file is installed, it falls back to a typographic wordmark. That
- * is deliberate: a wordmark is visibly "the logo is not here yet", whereas a
- * hand-drawn SVG tree would be a plausible-looking counterfeit that could
- * reach production, or worse, packaging, before anyone noticed it was wrong.
+ * Two sources, checked in order:
  *
- * To install or replace it, save the official artwork to one of:
- *     public/brand/ssg-logo.svg   (preferred — sharp at every size)
- *     public/brand/ssg-logo.png   (transparent background)
+ *   1. `store_settings.logo_path` — set from Admin → Settings
+ *      (src/server/actions/settings-actions.ts), stored in the `brand-assets`
+ *      bucket. Lets the owner swap the logo without a deploy.
+ *   2. The file installed at build time: public/brand/ssg-logo.svg|png.
  *
- * The real mark is a roughly SQUARE lockup — the tree canopy stacked above
- * "SSG PRODUCTS" stacked above the root system — not the wide horizontal
- * lockup a nav-bar logo usually is. The aspect ratio below is read from the
- * installed file's own PNG header rather than assumed, so replacing the
- * asset with a differently-proportioned one does not silently distort it.
+ * Falling back to a typographic wordmark when NEITHER exists is deliberate:
+ * a wordmark is visibly "the logo is not here yet", whereas a hand-drawn SVG
+ * tree would be a plausible-looking counterfeit that could reach production,
+ * or worse, packaging, before anyone noticed it was wrong.
  *
- * Resolution happens at module load, so restart the dev server after adding
- * or replacing the file.
+ * This is a Server Component (it calls the database), which Next.js runs as
+ * an async function — every existing call site (`<Logo />` inside other
+ * Server Components) already supports that without any change on their end.
  */
 
 const CANDIDATES = ['/brand/ssg-logo.svg', '/brand/ssg-logo.png'] as const;
 
-const resolvedLogo = CANDIDATES.find((path) =>
-  existsSync(join(process.cwd(), 'public', path)),
-);
+const installedLogo = CANDIDATES.find((path) => existsSync(join(process.cwd(), 'public', path)));
 
 /**
  * Reads width/height straight from a PNG's IHDR chunk (bytes 16–23) rather
@@ -58,10 +55,20 @@ function readPngAspectRatio(absolutePath: string): number | null {
   }
 }
 
-const logoAspectRatio =
-  resolvedLogo?.endsWith('.png')
-    ? (readPngAspectRatio(join(process.cwd(), 'public', resolvedLogo)) ?? 1)
+const installedLogoAspectRatio =
+  installedLogo?.endsWith('.png')
+    ? (readPngAspectRatio(join(process.cwd(), 'public', installedLogo)) ?? 1)
     : 1;
+
+/**
+ * The real SSG lockup is a roughly SQUARE mark — the tree canopy stacked
+ * above "SSG PRODUCTS" stacked above the root system — so 1:1 is used as the
+ * aspect ratio for an admin-uploaded logo, whose exact proportions cannot be
+ * read without a round trip to Storage on every render. An admin who uploads
+ * a differently-shaped mark can crop it to square before uploading; this is
+ * a display default, not a hard constraint enforced anywhere.
+ */
+const UPLOADED_LOGO_ASPECT_RATIO = 1;
 
 type LogoProps = {
   /** Rendered height in px. Width follows the asset's real aspect ratio. */
@@ -74,14 +81,34 @@ type LogoProps = {
   decorative?: boolean;
 };
 
-export function Logo({ size = 40, className, decorative = false }: LogoProps) {
-  if (resolvedLogo) {
+export async function Logo({ size = 40, className, decorative = false }: LogoProps) {
+  // Never let a settings lookup take the logo down with it — every page that
+  // renders <Logo> would otherwise 500 if this query ever failed.
+  const settings = await getStoreSettings().catch(() => null);
+
+  if (settings?.logo_path) {
     return (
       <Image
-        src={resolvedLogo}
+        src={brandAssetUrl(settings.logo_path)}
         alt={decorative ? '' : `${BRAND.name} logo`}
         aria-hidden={decorative || undefined}
-        width={Math.round(size * logoAspectRatio)}
+        width={Math.round(size * UPLOADED_LOGO_ASPECT_RATIO)}
+        height={size}
+        priority
+        unoptimized // remote SVGs are not run through next/image's optimizer
+        className={cn('h-auto w-auto object-contain', className)}
+        style={{ height: size }}
+      />
+    );
+  }
+
+  if (installedLogo) {
+    return (
+      <Image
+        src={installedLogo}
+        alt={decorative ? '' : `${BRAND.name} logo`}
+        aria-hidden={decorative || undefined}
+        width={Math.round(size * installedLogoAspectRatio)}
         height={size}
         priority
         className={cn('h-auto w-auto object-contain', className)}

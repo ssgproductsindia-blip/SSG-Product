@@ -1,3 +1,5 @@
+import { publicEnv } from '@/lib/env';
+
 /**
  * Fixed brand facts, transcribed from the SSG packaging and artwork.
  *
@@ -59,4 +61,17 @@ export function formatPhone(phone: string | null | undefined): string | null {
   const local = digits.length > 10 ? digits.slice(-10) : digits;
   if (local.length !== 10) return phone;
   return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
+}
+
+/**
+ * Public URL for a file in the `brand-assets` Storage bucket (the admin-
+ * uploaded logo — see settings-actions.ts). A plain function rather than a
+ * Server Component export, deliberately: <Logo> (components/brand/logo.tsx)
+ * imports `node:fs` and is a Server Component, so it cannot itself be
+ * imported from the client-side logo-uploader form. This lives here, in a
+ * module with no server-only imports, so both sides can use it.
+ */
+export function brandAssetUrl(storagePath: string): string {
+  const base = publicEnv.NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/, '');
+  return `${base}/storage/v1/object/public/brand-assets/${storagePath.replace(/^\//, '')}`;
 }
