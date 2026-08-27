@@ -224,7 +224,13 @@ export function PurchasePanel({ product }: { product: CatalogProduct }) {
           size="lg"
           onClick={handleAdd}
           disabled={!available}
-          className="flex-1"
+          // Not a bare `flex-1`: on mobile this container is flex-col, where
+          // flex-1 (flex-basis: 0%) makes the flex algorithm own the HEIGHT
+          // axis instead of the button's own `h-13`, collapsing it to its
+          // content's minimum height. `w-full` gives mobile the intended
+          // fixed height; `sm:flex-1` only takes over once the container is
+          // flex-row, where flex-1 correctly governs width instead.
+          className="w-full sm:flex-1"
           aria-live="polite"
         >
           {justAdded ? (
@@ -245,7 +251,7 @@ export function PurchasePanel({ product }: { product: CatalogProduct }) {
           variant="secondary"
           onClick={handleBuyNow}
           disabled={!available}
-          className="flex-1"
+          className="w-full sm:flex-1"
         >
           Buy now
         </Button>
