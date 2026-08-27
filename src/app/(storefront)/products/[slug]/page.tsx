@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation';
 
 import { PurchasePanel } from '@/components/catalog/purchase-panel';
 import { publicEnv } from '@/lib/env';
-import { getProductBySlug, listProducts, type CatalogProduct } from '@/server/catalog';
+import { getProductBySlug, type CatalogProduct } from '@/server/catalog';
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -293,17 +293,3 @@ function Gallery({ product }: { product: CatalogProduct }) {
   );
 }
 
-/**
- * Pre-render the known product pages at build time. Products added later are
- * rendered on demand, because `dynamicParams` defaults to true.
- */
-export async function generateStaticParams() {
-  try {
-    const products = await listProducts();
-    return products.map((product) => ({ slug: product.slug }));
-  } catch {
-    // No database at build time is not a build failure — every page just
-    // renders on first request instead.
-    return [];
-  }
-}
