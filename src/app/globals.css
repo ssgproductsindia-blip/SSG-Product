@@ -183,6 +183,19 @@ body {
   }
 }
 
+/* A slow, gentle rotation for small decorative marks (the sun-ray doodle on
+   /about) — named explicitly rather than relying on an arbitrary Tailwind
+   `animate-[spin_...]` value, which would depend on a `spin` keyframe Tailwind
+   only emits alongside its own `animate-spin` utility, not a name safe to
+   assume exists. 28s is deliberately slow: decoration, not motion. Already
+   covered by the reduced-motion rule above, since that rule targets every
+   animation via the universal selector. */
+@keyframes ssg-gentle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ==========================================================================
    Utilities
    ========================================================================== */
