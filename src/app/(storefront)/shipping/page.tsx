@@ -43,13 +43,9 @@ export default async function ShippingPage() {
           shipping, its status moves to Confirmed and then Processing as we
           prepare it. When it is handed to the courier, its status moves to
           Shipped and you will receive an email with the courier name and
-          tracking ID.
+          tracking ID. Delivery typically takes 2–4 business days after
+          dispatch.
         </p>
-        <ConfigurableNotice>
-          Specific delivery-time estimates by location (e.g. how many days
-          after dispatch) have not been finalised yet. This section will be
-          updated once that is confirmed.
-        </ConfigurableNotice>
       </LegalSection>
 
       <LegalSection title="Shipping charges">

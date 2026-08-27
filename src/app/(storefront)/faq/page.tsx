@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { ConfigurableNotice } from '@/components/content/configurable-notice';
 import { BRAND } from '@/lib/brand';
 
 export const metadata: Metadata = {
@@ -20,10 +19,10 @@ export const metadata: Metadata = {
  * already does correctly.
  *
  * Answers about what this system actually does (tracking, variants) are
- * written as fact. Answers about business policy that has not been supplied
- * (payment methods, return windows) carry a ConfigurableNotice instead of an
- * invented policy — the brief is explicit that no official SSG policy may be
- * fabricated here.
+ * written as fact. Every other answer here reflects a real, confirmed policy
+ * decision (shipping rates, returns, payments) — none of it is invented; see
+ * ConfigurableNotice (components/content/configurable-notice.tsx) for how an
+ * unconfirmed policy is meant to be marked if one is ever added back.
  */
 
 type Faq = { q: string; a: React.ReactNode };
@@ -94,20 +93,15 @@ const SECTIONS: Section[] = [
       {
         q: 'How long does delivery take, and what does shipping cost?',
         a: (
-          <>
-            <p>
-              We ship all over India. Shipping is ₹50 within Tamil Nadu and
-              ₹100 elsewhere in India (see current rates on the{' '}
-              <Link href="/shipping" className="underline">
-                Shipping Information
-              </Link>{' '}
-              page — they can change, so that page is the source of truth).
-            </p>
-            <ConfigurableNotice>
-              Specific delivery-time estimates by location have not been
-              finalised yet.
-            </ConfigurableNotice>
-          </>
+          <p>
+            We ship all over India, with delivery typically taking 2–4
+            business days after dispatch. Shipping is ₹50 within Tamil Nadu
+            and ₹100 elsewhere in India (see current rates on the{' '}
+            <Link href="/shipping" className="underline">
+              Shipping Information
+            </Link>{' '}
+            page — they can change, so that page is the source of truth).
+          </p>
         ),
       },
     ],
@@ -157,15 +151,15 @@ const SECTIONS: Section[] = [
       {
         q: 'What is the return or refund process?',
         a: (
-          <ConfigurableNotice>
-            Our official return and refund policy has not been published yet.
-            See the{' '}
+          <p>
+            Returns are accepted within 7 days of delivery. Full details,
+            including who covers return shipping and how refunds are
+            processed, are on the{' '}
             <Link href="/returns" className="underline">
               Returns &amp; Refunds
             </Link>{' '}
-            page, and contact us directly for any issue with an order in the
-            meantime.
-          </ConfigurableNotice>
+            page.
+          </p>
         ),
       },
     ],
