@@ -199,6 +199,7 @@ export type StoreSettingsRow = {
   email: string | null;
   address: string | null;
   shipping_flat_paise: number | null;
+  shipping_tamil_nadu_paise: number | null;
   free_shipping_threshold_paise: number | null;
   tax_config: Record<string, unknown>;
   updated_at: string;

@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { ConfigurableNotice } from '@/components/content/configurable-notice';
 import { LegalPage, LegalSection } from '@/components/content/legal-page';
 import { BRAND } from '@/lib/brand';
+import { formatPaise } from '@/lib/money';
+import { getStoreSettings } from '@/server/catalog';
 
 export const metadata: Metadata = {
   title: 'Shipping Information',
@@ -11,58 +13,77 @@ export const metadata: Metadata = {
   alternates: { canonical: '/shipping' },
 };
 
-export default function ShippingPage() {
+/**
+ * Shipping rates are read live from store_settings rather than written here
+ * as fixed prose — the same ₹50/₹100 figures the admin sets in
+ * Settings → Shipping. If the owner changes a rate there, this page updates
+ * with it instead of quietly going stale.
+ */
+export default async function ShippingPage() {
+  const settings = await getStoreSettings();
+
+  const restOfIndia = settings?.shipping_flat_paise ?? null;
+  const tamilNadu = settings?.shipping_tamil_nadu_paise ?? null;
+  const threshold = settings?.free_shipping_threshold_paise ?? null;
+  const tiered = restOfIndia !== null && tamilNadu !== null;
+
   return (
     <LegalPage
       title="Shipping Information"
       intro="How your order gets from us to you."
     >
-      <LegalSection title="Order processing">
-        <p>
-          Once placed, your order is reviewed and confirmed by our team. You
-          will receive an email confirmation immediately, and the order status
-          moves through Placed → Confirmed → Processing → Packed as it is
-          prepared.
-        </p>
+      <LegalSection title="Delivery locations">
+        <p>We ship all over India.</p>
       </LegalSection>
 
-      <LegalSection title="Dispatch and courier">
+      <LegalSection title="Order processing and dispatch">
         <p>
-          When your order is packed and handed to a courier, its status moves
-          to Shipped and you will receive an email with the courier name and
+          Once placed, your order is reviewed and confirmed by our team —
+          usually the same day. As soon as it is confirmed and ready for
+          shipping, its status moves to Confirmed and then Processing as we
+          prepare it. When it is handed to the courier, its status moves to
+          Shipped and you will receive an email with the courier name and
           tracking ID.
         </p>
         <ConfigurableNotice>
-          Which courier partners we use and typical dispatch timelines have
-          not been finalised yet. This section will be updated once that
-          information is confirmed.
-        </ConfigurableNotice>
-      </LegalSection>
-
-      <LegalSection title="Delivery timelines">
-        <ConfigurableNotice>
-          Estimated delivery times by location have not been published yet.
-          Please do not rely on any timeline not stated directly by our team
-          for your order.
+          Specific delivery-time estimates by location (e.g. how many days
+          after dispatch) have not been finalised yet. This section will be
+          updated once that is confirmed.
         </ConfigurableNotice>
       </LegalSection>
 
       <LegalSection title="Shipping charges">
-        <ConfigurableNotice>
-          Shipping charges, and any free-shipping threshold, are shown at
-          checkout based on current store configuration. Official published
-          rates for this page have not been finalised yet.
-        </ConfigurableNotice>
+        {restOfIndia === null ? (
+          <ConfigurableNotice>
+            Shipping charges have not been configured yet. They will appear
+            here, and at checkout, once set.
+          </ConfigurableNotice>
+        ) : (
+          <>
+            <ul className="list-disc space-y-1.5 pl-5">
+              {tiered ? (
+                <>
+                  <li>Within Tamil Nadu: {formatPaise(tamilNadu)} per order</li>
+                  <li>Rest of India: {formatPaise(restOfIndia)} per order</li>
+                </>
+              ) : (
+                <li>{formatPaise(restOfIndia)} per order, anywhere in India</li>
+              )}
+            </ul>
+            {threshold !== null ? (
+              <p>
+                Orders totalling {formatPaise(threshold)} or more ship free,
+                regardless of destination.
+              </p>
+            ) : null}
+          </>
+        )}
       </LegalSection>
 
-      <LegalSection title="Delivery locations">
+      <LegalSection title="Payment on delivery">
         <p>
-          We currently ship within India. If you have a question about
-          delivery to a specific location, please{' '}
-          <Link href="/contact" className="text-green-800 hover:underline">
-            contact us
-          </Link>{' '}
-          before ordering.
+          Cash on Delivery is not available at this time. All orders are paid
+          for online at checkout.
         </p>
       </LegalSection>
 

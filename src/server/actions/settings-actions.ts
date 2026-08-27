@@ -13,8 +13,10 @@ import { recordAudit, requireAdmin } from '@/server/auth';
  * Only fields that actually drive something in the app are exposed here:
  * store name, WhatsApp, Instagram, contact email (where the Contact form
  * delivers to — see src/lib/email/contact.ts), address (shown on the Contact
- * page), and flat-rate shipping (read by src/server/pricing.ts and
- * create_order at checkout).
+ * page), and shipping (read by src/server/pricing.ts and create_order at
+ * checkout) — a default rate plus an optional Tamil Nadu override, since
+ * that is SSG's actual policy: cheaper within Tamil Nadu, one flat rate
+ * everywhere else in India.
  *
  * `tax_config` exists as a column but has no reader anywhere in this
  * codebase — nothing computes tax on an order. Building a settings form for
@@ -62,6 +64,7 @@ export async function updateStoreSettingsAction(input: unknown): Promise<ActionR
       email: s.email || null,
       address: s.address || null,
       shipping_flat_paise: s.shippingFlatPaise ?? null,
+      shipping_tamil_nadu_paise: s.shippingTamilNaduPaise ?? null,
       free_shipping_threshold_paise: s.freeShippingThresholdPaise ?? null,
     })
     .eq('id', true);
@@ -79,6 +82,7 @@ export async function updateStoreSettingsAction(input: unknown): Promise<ActionR
       instagram_url: s.instagramUrl || null,
       email: s.email || null,
       shipping_flat_paise: s.shippingFlatPaise ?? null,
+      shipping_tamil_nadu_paise: s.shippingTamilNaduPaise ?? null,
       free_shipping_threshold_paise: s.freeShippingThresholdPaise ?? null,
     },
   });

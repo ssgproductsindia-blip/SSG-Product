@@ -94,14 +94,20 @@ const SECTIONS: Section[] = [
       {
         q: 'How long does delivery take, and what does shipping cost?',
         a: (
-          <ConfigurableNotice>
-            Delivery times and shipping charges have not been finalised yet.
-            See the{' '}
-            <Link href="/shipping" className="underline">
-              Shipping Information
-            </Link>{' '}
-            page for details as they are confirmed.
-          </ConfigurableNotice>
+          <>
+            <p>
+              We ship all over India. Shipping is ₹50 within Tamil Nadu and
+              ₹100 elsewhere in India (see current rates on the{' '}
+              <Link href="/shipping" className="underline">
+                Shipping Information
+              </Link>{' '}
+              page — they can change, so that page is the source of truth).
+            </p>
+            <ConfigurableNotice>
+              Specific delivery-time estimates by location have not been
+              finalised yet.
+            </ConfigurableNotice>
+          </>
         ),
       },
     ],
@@ -136,11 +142,11 @@ const SECTIONS: Section[] = [
       {
         q: 'What payment methods are supported?',
         a: (
-          <ConfigurableNotice>
-            Online payment is not enabled yet. Orders are currently recorded
-            and confirmed by the team directly — you will be contacted to
-            arrange payment before dispatch.
-          </ConfigurableNotice>
+          <p>
+            All orders are paid online at checkout via our payment gateway —
+            cards, UPI, netbanking and wallets. Cash on Delivery is not
+            available at this time.
+          </p>
         ),
       },
     ],

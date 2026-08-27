@@ -244,6 +244,9 @@ export const storeSettingsSchema = z.object({
   email: z.string().trim().email().max(254).optional().or(z.literal('')),
   address: z.string().trim().max(500).optional().or(z.literal('')),
   shippingFlatPaise: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  /** Tamil Nadu override. When set alongside shippingFlatPaise, Tamil Nadu
+   *  orders pay this instead of the default rate — see src/server/pricing.ts. */
+  shippingTamilNaduPaise: z.number().int().min(0).max(10_000_000).nullable().optional(),
   freeShippingThresholdPaise: z.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 

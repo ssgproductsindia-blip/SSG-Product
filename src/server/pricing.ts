@@ -17,7 +17,8 @@ import type { CartLineInput } from '@/lib/validation';
  *
  *   subtotal_paise = Σ selling_price × qty   what the customer actually pays for goods
  *   discount_paise = Σ (mrp − selling) × qty what they saved against MRP (informational)
- *   shipping_paise = from store_settings     0 when the owner has not configured it
+ *   shipping_paise = from store_settings     0 when unconfigured; may depend on the
+ *                                            destination state — see resolveShipping()
  *   total_paise    = subtotal + shipping     the amount due
  *
  * discount_paise is NOT subtracted from the total. It is a record of the saving
@@ -55,6 +56,10 @@ export type PricingResult =
       shippingPaise: number;
       totalPaise: number;
       shippingConfigured: boolean;
+      /** True when a Tamil Nadu-specific rate exists but the destination
+       *  state was not supplied — shippingPaise is a provisional default in
+       *  that case, not a confirmed charge. See resolveShipping(). */
+      shippingStateDependent: boolean;
     }
   | { ok: false; issues: PricingIssue[] };
 
@@ -66,7 +71,10 @@ export type PricingResult =
  * instead of silently vanishing into a "not found" — the customer gets a
  * accurate message about an item they may have had in their cart for days.
  */
-export async function priceCart(lines: CartLineInput[]): Promise<PricingResult> {
+export async function priceCart(
+  lines: CartLineInput[],
+  shippingState?: string | null,
+): Promise<PricingResult> {
   if (lines.length === 0) {
     return { ok: false, issues: [] };
   }
@@ -176,47 +184,81 @@ export async function priceCart(lines: CartLineInput[]): Promise<PricingResult> 
     0,
   );
 
-  const { shippingPaise, configured } = await resolveShipping(subtotalPaise);
+  const shipping = await resolveShipping(subtotalPaise, shippingState ?? null);
 
   return {
     ok: true,
     lines: priced,
     subtotalPaise,
     discountPaise,
-    shippingPaise,
-    totalPaise: subtotalPaise + shippingPaise,
-    shippingConfigured: configured,
+    shippingPaise: shipping.shippingPaise,
+    totalPaise: subtotalPaise + shipping.shippingPaise,
+    shippingConfigured: shipping.configured,
+    shippingStateDependent: shipping.stateDependent,
   };
+}
+
+/**
+ * True for any reasonable way a customer might type "Tamil Nadu" into a free
+ * text field: full name, run together, abbreviated, any casing or spacing.
+ * Strips everything but letters before comparing, so this is also exactly
+ * what the SQL side of create_order (0010_tiered_shipping.sql) does — the two
+ * MUST agree, or the amount priced before payment and the amount create_order
+ * actually charges could diverge.
+ */
+function isTamilNadu(state: string): boolean {
+  const normalized = state.toLowerCase().replace(/[^a-z]/g, '');
+  return normalized === 'tamilnadu' || normalized === 'tn';
 }
 
 /**
  * Shipping cost from store settings.
  *
- * The brief (§74) forbids inventing a shipping cost, so an unconfigured store
- * charges nothing and reports `configured: false`. The checkout surfaces that
- * as "Shipping — calculated separately" rather than a confident "FREE", which
- * would be a claim the owner never made.
+ * The brief (§74) forbids inventing a shipping cost, so a store with neither
+ * rate configured charges nothing and reports `configured: false`.
+ *
+ * SSG's real policy is two rates, not one — cheaper within Tamil Nadu, more
+ * outside it — so a single number is only ever the full story when either
+ * (a) only the default rate is set (no tiering), or (b) the caller has
+ * supplied a destination state. When tiering is active and the state is not
+ * yet known (the cart page, before an address exists), `stateDependent: true`
+ * says so: `shippingPaise` in that case is the default/non-Tamil-Nadu rate,
+ * offered as a provisional figure, not a confirmed charge — the UI must not
+ * present it as settled. See cart-view.tsx's "Calculated at checkout" case.
  */
 async function resolveShipping(
   subtotalPaise: number,
-): Promise<{ shippingPaise: number; configured: boolean }> {
+  state: string | null,
+): Promise<{ shippingPaise: number; configured: boolean; stateDependent: boolean }> {
   const supabase = createServiceClient();
 
   const { data } = await supabase
     .from('store_settings')
-    .select('shipping_flat_paise, free_shipping_threshold_paise')
+    .select('shipping_flat_paise, shipping_tamil_nadu_paise, free_shipping_threshold_paise')
     .eq('id', true)
     .maybeSingle();
 
-  const flat = data?.shipping_flat_paise ?? null;
-  if (flat === null) {
-    return { shippingPaise: 0, configured: false };
+  const defaultRate = data?.shipping_flat_paise ?? null;
+  if (defaultRate === null) {
+    return { shippingPaise: 0, configured: false, stateDependent: false };
   }
+
+  const tamilNaduRate = data?.shipping_tamil_nadu_paise ?? null;
+  const tieringActive = tamilNaduRate !== null;
+  const stateKnown = state !== null && state.trim() !== '';
+
+  const rate = tieringActive && stateKnown && isTamilNadu(state) ? tamilNaduRate : defaultRate;
 
   const threshold = data?.free_shipping_threshold_paise ?? null;
   if (threshold !== null && subtotalPaise >= threshold) {
-    return { shippingPaise: 0, configured: true };
+    // Free is free regardless of destination — no need to flag this as
+    // state-dependent even when tiering is active and the state is unknown.
+    return { shippingPaise: 0, configured: true, stateDependent: false };
   }
 
-  return { shippingPaise: flat, configured: true };
+  return {
+    shippingPaise: rate,
+    configured: true,
+    stateDependent: tieringActive && !stateKnown,
+  };
 }

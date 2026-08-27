@@ -19,13 +19,14 @@ export default async function ReturnsPage() {
   return (
     <LegalPage
       title="Returns & Refunds"
-      intro="Our official return and refund policy is being finalised. This page outlines the structure that policy will follow."
+      intro="Our full return and refund policy is still being finalised — the return window below is confirmed, the rest of this page outlines the structure that policy will follow."
     >
       <LegalSection title="Return eligibility">
+        <p>Returns are accepted within 7 days of delivery.</p>
         <ConfigurableNotice>
-          The specific eligibility window and conditions for returns (e.g.
-          unopened products, time since delivery) have not been published
-          yet.
+          Further conditions — such as whether a product must be unopened or
+          unused to qualify, and who covers return shipping — have not been
+          published yet.
         </ConfigurableNotice>
       </LegalSection>
 

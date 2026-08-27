@@ -15,6 +15,7 @@ type Initial = {
   email: string;
   address: string;
   shippingFlatPaise: number | null;
+  shippingTamilNaduPaise: number | null;
   freeShippingThresholdPaise: number | null;
 };
 
@@ -25,9 +26,12 @@ type Initial = {
  * connection is visible from the form itself rather than only in a code
  * comment: WhatsApp/Instagram feed the footer and contact page, the email
  * feeds the contact-form destination, the address shows on /contact, and the
- * two shipping figures are what src/server/pricing.ts actually charges at
- * checkout — leaving the shipping fields blank means shipping stays free,
- * not "not yet decided".
+ * shipping figures are what src/server/pricing.ts and create_order actually
+ * charge at checkout — leaving them blank means shipping stays free, not
+ * "not yet decided". The Tamil Nadu rate only takes effect once the
+ * rest-of-India rate is also set; a Tamil Nadu rate alone has no default to
+ * fall back to for every other state, so the form blocks that combination
+ * client-side rather than silently saving something that does nothing.
  */
 export function SettingsForm({ initial }: { initial: Initial }) {
   const [submitting, setSubmitting] = useState(false);
@@ -44,13 +48,28 @@ export function SettingsForm({ initial }: { initial: Initial }) {
     const text = (name: string) => String(form.get(name) ?? '').trim();
 
     const flatRaw = text('shippingFlat');
+    const tamilNaduRaw = text('shippingTamilNadu');
     const thresholdRaw = text('freeShippingThreshold');
 
     const shippingFlatPaise = flatRaw === '' ? null : rupeesToPaise(flatRaw);
+    const shippingTamilNaduPaise = tamilNaduRaw === '' ? null : rupeesToPaise(tamilNaduRaw);
     const freeShippingThresholdPaise = thresholdRaw === '' ? null : rupeesToPaise(thresholdRaw);
 
     if (flatRaw !== '' && shippingFlatPaise === null) {
-      setResult({ ok: false, message: 'Enter the shipping rate as a plain number, e.g. 60' });
+      setResult({ ok: false, message: 'Enter the shipping rate as a plain number, e.g. 100' });
+      setSubmitting(false);
+      return;
+    }
+    if (tamilNaduRaw !== '' && shippingTamilNaduPaise === null) {
+      setResult({ ok: false, message: 'Enter the Tamil Nadu rate as a plain number, e.g. 50' });
+      setSubmitting(false);
+      return;
+    }
+    if (tamilNaduRaw !== '' && flatRaw === '') {
+      setResult({
+        ok: false,
+        message: 'Set the rest-of-India rate too — a Tamil Nadu rate with no default has nothing to fall back to outside Tamil Nadu.',
+      });
       setSubmitting(false);
       return;
     }
@@ -67,6 +86,7 @@ export function SettingsForm({ initial }: { initial: Initial }) {
       email: text('email'),
       address: text('address'),
       shippingFlatPaise,
+      shippingTamilNaduPaise,
       freeShippingThresholdPaise,
     });
 
@@ -130,13 +150,26 @@ export function SettingsForm({ initial }: { initial: Initial }) {
       <div className="grid gap-5 border-t border-line pt-5 sm:grid-cols-2">
         <Field
           name="shippingFlat"
-          label="Shipping rate"
+          label="Shipping rate — rest of India"
           prefix="₹"
           inputMode="decimal"
           defaultValue={
             initial.shippingFlatPaise !== null ? paiseToRupeeInput(initial.shippingFlatPaise) : ''
           }
-          hint="Charged on every order. Leave blank for free shipping on everything."
+          hint="Charged on every order, unless a Tamil Nadu rate below applies. Leave blank for free shipping on everything."
+        />
+        <Field
+          name="shippingTamilNadu"
+          label="Shipping rate — Tamil Nadu"
+          optional
+          prefix="₹"
+          inputMode="decimal"
+          defaultValue={
+            initial.shippingTamilNaduPaise !== null
+              ? paiseToRupeeInput(initial.shippingTamilNaduPaise)
+              : ''
+          }
+          hint="Charged instead of the rate above when the delivery state is Tamil Nadu. Leave blank to charge the same rate everywhere."
         />
         <Field
           name="freeShippingThreshold"
@@ -148,7 +181,8 @@ export function SettingsForm({ initial }: { initial: Initial }) {
               ? paiseToRupeeInput(initial.freeShippingThresholdPaise)
               : ''
           }
-          hint="Waives the shipping rate above this subtotal. Does nothing if the rate above is blank."
+          hint="Waives shipping above this subtotal, in every state. Does nothing if the rest-of-India rate above is blank."
+          className="sm:col-span-2"
         />
       </div>
 

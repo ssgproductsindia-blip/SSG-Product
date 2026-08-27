@@ -199,6 +199,7 @@ export function CheckoutForm({
     setStatusMessage('Preparing secure payment…');
     const paymentOrder = await createPaymentOrderAction(
       items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
+      fields.state,
     );
 
     if (!paymentOrder.ok) {

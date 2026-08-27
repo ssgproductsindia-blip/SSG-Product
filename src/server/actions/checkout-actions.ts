@@ -92,8 +92,21 @@ export type CreatePaymentOrderResult =
  * create an order for that exact figure. No SSG order exists yet at this
  * point; that only happens once a payment against this Razorpay order has
  * been verified, in placeOrderAction below.
+ *
+ * `shippingState` matters now that shipping is tiered (Tamil Nadu vs. rest of
+ * India, see src/server/pricing.ts): the customer has already typed their
+ * shipping address into the same checkout page by the time this is called, so
+ * their state is known here. Pricing the Razorpay order without it would open
+ * a payment for the DEFAULT rate even for a Tamil Nadu order, and
+ * placeOrderAction's own repricing inside create_order would then compute a
+ * different, correct total — surfacing as a spurious "amount mismatch" flag
+ * on every single Tamil Nadu order rather than the real signal it is meant
+ * to be.
  */
-export async function createPaymentOrderAction(items: unknown): Promise<CreatePaymentOrderResult> {
+export async function createPaymentOrderAction(
+  items: unknown,
+  shippingState?: unknown,
+): Promise<CreatePaymentOrderResult> {
   if (!paymentsConfigured()) {
     return { ok: false, error: 'Online payment is not enabled.' };
   }
@@ -115,7 +128,9 @@ export async function createPaymentOrderAction(items: unknown): Promise<CreatePa
     return { ok: false, error: parsedItems.error.issues[0]?.message ?? 'Your cart looks invalid.' };
   }
 
-  const priced = await priceCart(parsedItems.data);
+  const state = typeof shippingState === 'string' ? shippingState.trim().slice(0, 120) : null;
+
+  const priced = await priceCart(parsedItems.data, state);
   if (!priced.ok) {
     return {
       ok: false,

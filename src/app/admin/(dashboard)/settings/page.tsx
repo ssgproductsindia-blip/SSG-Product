@@ -47,6 +47,7 @@ export default async function AdminSettingsPage() {
             email: settings?.email ?? '',
             address: settings?.address ?? '',
             shippingFlatPaise: settings?.shipping_flat_paise ?? null,
+            shippingTamilNaduPaise: settings?.shipping_tamil_nadu_paise ?? null,
             freeShippingThresholdPaise: settings?.free_shipping_threshold_paise ?? null,
           }}
         />

@@ -90,7 +90,10 @@ export function CartView() {
   const subtotal = verified ? priced.subtotalPaise : indicativeSubtotalPaise;
   const savings = verified ? priced.discountPaise : 0;
   const shipping = verified ? priced.shippingPaise : 0;
-  const shippingKnown = verified && priced.shippingConfigured;
+  // Configured but state-dependent (Tamil Nadu vs. rest of India) and no
+  // address collected yet means `shipping` above is only the default rate —
+  // showing it as settled would be wrong for every Tamil Nadu order.
+  const shippingKnown = verified && priced.shippingConfigured && !priced.shippingStateDependent;
   const total = verified ? priced.totalPaise : indicativeSubtotalPaise;
 
   return (
@@ -216,7 +219,11 @@ export function CartView() {
               <dd className="font-medium tabular-nums text-earth-900">
                 {/*
                   An unconfigured shipping rate says so. Printing "FREE" would
-                  be a promise the store owner never made.
+                  be a promise the store owner never made. A state-dependent
+                  rate (Tamil Nadu vs. rest of India) with no address yet gets
+                  its own distinct wording — it is not unconfigured, it is
+                  just not confirmed for THIS customer until checkout knows
+                  where they are shipping to.
                 */}
                 {!verified
                   ? '—'
@@ -224,7 +231,9 @@ export function CartView() {
                     ? shipping === 0
                       ? 'Free'
                       : formatPaise(shipping)
-                    : 'Calculated separately'}
+                    : priced && priced.ok && priced.shippingStateDependent
+                      ? 'Confirmed at checkout'
+                      : 'Calculated separately'}
               </dd>
             </div>
 
