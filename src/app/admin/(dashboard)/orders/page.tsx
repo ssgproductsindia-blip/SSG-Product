@@ -1,28 +1,15 @@
 import Link from 'next/link';
 
-import { PaymentStatusBadge } from '@/components/admin/payment-status-badge';
-import { StatusBadge } from '@/components/admin/status-badge';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { formatPaise } from '@/lib/money';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 import type { OrderStatus, PaymentStatus } from '@/lib/database.types';
 
+import { OrdersTable, type OrderRow } from './orders-table';
+
 export const dynamic = 'force-dynamic';
 
-const PAGE_SIZE = 20;
-
-type OrderRow = {
-  id: string;
-  order_number: string;
-  created_at: string;
-  status: OrderStatus;
-  payment_status: PaymentStatus;
-  total_paise: number;
-  customers: { name: string; email: string } | null;
-  order_items: { quantity: number }[];
-  shipments: { courier_name: string; tracking_id: string } | null;
-};
+const PAGE_SIZE = 10;
 
 /**
  * Resolves a search term to matching customer ids before the main query.
@@ -53,15 +40,27 @@ async function resolveCustomerIds(
   return (data ?? []).map((c) => c.id);
 }
 
+/** A plain `YYYY-MM-DD` string, as produced by `<input type="date">`. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; payment?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    payment?: string;
+    from?: string;
+    to?: string;
+    page?: string;
+  }>;
 }) {
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const statusFilter = (params.status ?? 'all') as OrderStatus | 'all';
   const paymentFilter = (params.payment ?? 'all') as PaymentStatus | 'all';
+  const dateFrom = DATE_ONLY.test(params.from ?? '') ? (params.from as string) : '';
+  const dateTo = DATE_ONLY.test(params.to ?? '') ? (params.to as string) : '';
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
 
   const supabase = await createClient();
@@ -79,6 +78,16 @@ export default async function AdminOrdersPage({
 
   if (statusFilter !== 'all') request = request.eq('status', statusFilter);
   if (paymentFilter !== 'all') request = request.eq('payment_status', paymentFilter);
+
+  // Treated as UTC day boundaries. An admin filtering "today" near midnight
+  // in IST could see yesterday's last few orders slip in or out — a real but
+  // minor edge case, not worth a timezone-aware query for an internal filter.
+  if (dateFrom) request = request.gte('created_at', `${dateFrom}T00:00:00.000Z`);
+  if (dateTo) {
+    const exclusiveEnd = new Date(`${dateTo}T00:00:00.000Z`);
+    exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+    request = request.lt('created_at', exclusiveEnd.toISOString());
+  }
 
   if (query) {
     const safe = query.replace(/[%_,()]/g, '');
@@ -110,10 +119,15 @@ export default async function AdminOrdersPage({
     if (query) p.set('q', query);
     if (statusFilter !== 'all') p.set('status', statusFilter);
     if (paymentFilter !== 'all') p.set('payment', paymentFilter);
+    if (dateFrom) p.set('from', dateFrom);
+    if (dateTo) p.set('to', dateTo);
     if (target > 1) p.set('page', String(target));
     const qs = p.toString();
     return qs ? `/admin/orders?${qs}` : '/admin/orders';
   }
+
+  const hasActiveFilter =
+    Boolean(query) || statusFilter !== 'all' || paymentFilter !== 'all' || Boolean(dateFrom) || Boolean(dateTo);
 
   return (
     <div>
@@ -171,9 +185,42 @@ export default async function AdminOrdersPage({
             <option value="refunded">Refunded</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="from" className="sr-only">
+            From date
+          </label>
+          <input
+            id="from"
+            name="from"
+            type="date"
+            defaultValue={dateFrom}
+            max={dateTo || undefined}
+            className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm focus:border-green-600"
+          />
+          <span aria-hidden className="text-stone-400">–</span>
+          <label htmlFor="to" className="sr-only">
+            To date
+          </label>
+          <input
+            id="to"
+            name="to"
+            type="date"
+            defaultValue={dateTo}
+            min={dateFrom || undefined}
+            className="rounded-lg border border-line bg-white px-3 py-2.5 text-sm focus:border-green-600"
+          />
+        </div>
         <Button type="submit" variant="subtle">
           Filter
         </Button>
+        {hasActiveFilter ? (
+          <Link
+            href="/admin/orders"
+            className={cn(buttonVariants({ variant: 'ghost' }), 'self-center')}
+          >
+            Clear
+          </Link>
+        ) : null}
       </form>
 
       {error ? (
@@ -186,84 +233,14 @@ export default async function AdminOrdersPage({
       ) : orders.length === 0 ? (
         <div className="mt-6 rounded-2xl border border-dashed border-line bg-white p-10 text-center">
           <p className="font-display text-lg font-semibold text-earth-900">
-            {query || statusFilter !== 'all' || paymentFilter !== 'all'
-              ? 'No orders match that filter.'
-              : 'No orders yet.'}
+            {hasActiveFilter ? 'No orders match that filter.' : 'No orders yet.'}
           </p>
           <p className="mt-2 text-sm text-stone-500">
-            {query || statusFilter !== 'all' || paymentFilter !== 'all'
-              ? ''
-              : 'They will appear here as customers check out.'}
+            {hasActiveFilter ? '' : 'They will appear here as customers check out.'}
           </p>
         </div>
       ) : (
-        <div className="mt-6 overflow-x-auto rounded-2xl border border-line bg-white">
-          <table className="w-full min-w-3xl text-sm">
-            <caption className="sr-only">
-              Orders{query ? ` matching "${query}"` : ''}, page {page} of {pageCount}
-            </caption>
-            <thead>
-              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-stone-500">
-                <th scope="col" className="px-4 py-3 font-medium">Order</th>
-                <th scope="col" className="px-4 py-3 font-medium">Customer</th>
-                <th scope="col" className="px-4 py-3 font-medium">Date</th>
-                <th scope="col" className="px-4 py-3 text-right font-medium">Amount</th>
-                <th scope="col" className="px-4 py-3 font-medium">Status</th>
-                <th scope="col" className="px-4 py-3 font-medium">Payment</th>
-                <th scope="col" className="px-4 py-3 font-medium">Tracking</th>
-                <th scope="col" className="px-4 py-3 font-medium">
-                  <span className="sr-only">Action</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {orders.map((order) => (
-                <tr key={order.id} className="hover:bg-stone-50">
-                  <td className="px-4 py-3 font-medium text-earth-900">{order.order_number}</td>
-                  <td className="px-4 py-3">
-                    <p className="text-stone-700">{order.customers?.name ?? '—'}</p>
-                    <p className="text-xs text-stone-500">{order.customers?.email ?? ''}</p>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-stone-500">
-                    {new Date(order.created_at).toLocaleDateString('en-IN', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums text-earth-900">
-                    {formatPaise(order.total_paise)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={order.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <PaymentStatusBadge status={order.payment_status} />
-                  </td>
-                  <td className="px-4 py-3 text-xs text-stone-500">
-                    {order.shipments ? (
-                      <>
-                        {order.shipments.courier_name}
-                        <br />
-                        {order.shipments.tracking_id}
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/admin/orders/${order.order_number}`}
-                      className="font-medium text-green-800 hover:underline"
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <OrdersTable orders={orders} />
       )}
 
       {pageCount > 1 ? (

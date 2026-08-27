@@ -9,8 +9,9 @@ import { orderShippedEmail } from '@/lib/email/templates';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { orderStatusSchema, shipmentSchema } from '@/lib/validation';
-import { recordAudit, requireAdmin } from '@/server/auth';
+import { recordAudit, requireAdmin, type AdminUser } from '@/server/auth';
 import { STATUS_SEQUENCE } from '@/components/admin/status-badge';
+import type { OrderStatus } from '@/lib/database.types';
 
 /**
  * Admin order management.
@@ -42,15 +43,20 @@ const updateStatusInput = z.object({
   status: orderStatusSchema,
 });
 
-export async function updateOrderStatusAction(input: unknown): Promise<ActionResult> {
-  const admin = await requireAdmin();
-
-  const parsed = updateStatusInput.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid status.' };
-  }
-  const { orderId, status } = parsed.data;
-
+/**
+ * The actual status-change logic for one order, shared by the single-order
+ * form and the bulk action below. Does not revalidate any paths itself —
+ * callers do that once, after they know which order numbers were actually
+ * touched, so a bulk change over 30 orders does not revalidate 30 times.
+ */
+async function applyOrderStatusChange(
+  admin: AdminUser,
+  orderId: string,
+  status: OrderStatus,
+): Promise<
+  | { ok: true; message: string; orderNumber: string }
+  | { ok: false; error: string; orderNumber?: string }
+> {
   const supabase = await createClient();
 
   const { data: order, error: readError } = await supabase
@@ -64,7 +70,11 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
   }
 
   if (order.status === status) {
-    return { ok: true, message: `Order is already ${status.replace(/_/g, ' ')}.` };
+    return {
+      ok: true,
+      message: `Order is already ${status.replace(/_/g, ' ')}.`,
+      orderNumber: order.order_number,
+    };
   }
 
   // Cancelling is terminal: it is the one transition that gives stock back,
@@ -75,6 +85,7 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
     return {
       ok: false,
       error: 'This order is cancelled and its status cannot be changed further.',
+      orderNumber: order.order_number,
     };
   }
 
@@ -83,7 +94,11 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
     const { error } = await service.rpc('cancel_order', { p_order_id: orderId });
 
     if (error) {
-      return { ok: false, error: `Could not cancel the order: ${error.message}` };
+      return {
+        ok: false,
+        error: `Could not cancel the order: ${error.message}`,
+        orderNumber: order.order_number,
+      };
     }
 
     await recordAudit(admin, {
@@ -93,11 +108,11 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
       metadata: { order_number: order.order_number, from: order.status },
     });
 
-    revalidateOrderPaths(order.order_number);
     return {
       ok: true,
       message:
         'Order cancelled. Stock for its items has been restored. If this order was already paid, refund it separately in the Razorpay dashboard — cancelling here does not do that automatically.',
+      orderNumber: order.order_number,
     };
   }
 
@@ -105,7 +120,11 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
   // a plain update under the admin's own RLS-checked session is enough.
   const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
   if (error) {
-    return { ok: false, error: `Could not update status: ${error.message}` };
+    return {
+      ok: false,
+      error: `Could not update status: ${error.message}`,
+      orderNumber: order.order_number,
+    };
   }
 
   await recordAudit(admin, {
@@ -115,8 +134,82 @@ export async function updateOrderStatusAction(input: unknown): Promise<ActionRes
     metadata: { order_number: order.order_number, from: order.status, to: status },
   });
 
-  revalidateOrderPaths(order.order_number);
-  return { ok: true, message: `Order marked ${status.replace(/_/g, ' ')}.` };
+  return {
+    ok: true,
+    message: `Order marked ${status.replace(/_/g, ' ')}.`,
+    orderNumber: order.order_number,
+  };
+}
+
+export async function updateOrderStatusAction(input: unknown): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  const parsed = updateStatusInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid status.' };
+  }
+  const { orderId, status } = parsed.data;
+
+  const result = await applyOrderStatusChange(admin, orderId, status);
+  if (result.orderNumber) revalidateOrderPaths(result.orderNumber);
+
+  return result.ok ? { ok: true, message: result.message } : { ok: false, error: result.error };
+}
+
+const bulkUpdateStatusInput = z.object({
+  orderIds: z
+    .array(z.string().uuid())
+    .min(1, 'Select at least one order.')
+    .max(200, 'Select at most 200 orders at a time.'),
+  status: orderStatusSchema,
+});
+
+/**
+ * Applies one status to many orders at once, from the orders-list checkbox
+ * selection.
+ *
+ * Runs sequentially rather than with Promise.all: `cancel_order` writes to
+ * shared inventory rows, and running these one at a time keeps every other
+ * order's outcome correct and independently reported even if one of them
+ * fails partway through the batch — a partial success is reported honestly
+ * ("8 updated; 2 could not be changed") rather than hidden behind a single
+ * pass/fail result.
+ */
+export async function bulkUpdateOrderStatusAction(input: unknown): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  const parsed = bulkUpdateStatusInput.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid request.' };
+  }
+  const { orderIds, status } = parsed.data;
+
+  let succeeded = 0;
+  let failed = 0;
+  const touchedOrderNumbers: string[] = [];
+
+  for (const orderId of orderIds) {
+    const result = await applyOrderStatusChange(admin, orderId, status);
+    if (result.orderNumber) touchedOrderNumbers.push(result.orderNumber);
+    if (result.ok) succeeded += 1;
+    else failed += 1;
+  }
+
+  for (const orderNumber of touchedOrderNumbers) revalidateOrderPaths(orderNumber);
+
+  if (succeeded === 0) {
+    return {
+      ok: false,
+      error: `Could not update any of the ${orderIds.length} selected order${orderIds.length === 1 ? '' : 's'}.`,
+    };
+  }
+
+  const message =
+    failed === 0
+      ? `Updated ${succeeded} order${succeeded === 1 ? '' : 's'}.`
+      : `Updated ${succeeded} order${succeeded === 1 ? '' : 's'}; ${failed} could not be changed (already cancelled, or no longer found).`;
+
+  return { ok: true, message };
 }
 
 // ---------------------------------------------------------------------------
