@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { ConfigurableNotice } from '@/components/content/configurable-notice';
 import { LegalPage, LegalSection } from '@/components/content/legal-page';
-import { BRAND } from '@/lib/brand';
+import { BRAND, formatPhone, whatsappUrl } from '@/lib/brand';
 import { paymentsConfigured } from '@/lib/env';
+import { getStoreSettings } from '@/server/catalog';
 
 export const metadata: Metadata = {
   title: 'Terms & Conditions',
@@ -12,8 +12,12 @@ export const metadata: Metadata = {
   alternates: { canonical: '/terms' },
 };
 
-export default function TermsPage() {
+export default async function TermsPage() {
   const paymentsOn = paymentsConfigured();
+  const settings = await getStoreSettings();
+  const contactEmail = settings?.email ?? null;
+  const whatsapp = whatsappUrl(settings?.whatsapp);
+  const whatsappLabel = formatPhone(settings?.whatsapp);
 
   return (
     <LegalPage
@@ -98,11 +102,63 @@ export default function TermsPage() {
       </LegalSection>
 
       <LegalSection title="Limitation of liability">
-        <ConfigurableNotice>
-          A specific limitation-of-liability clause has not been finalised
-          for this business yet. Standard consumer protections under
-          applicable Indian law apply regardless.
-        </ConfigurableNotice>
+        <p>
+          Our products are natural and herbal, and results can vary between
+          individuals. We make no guarantee of a specific outcome from using
+          any product, and nothing on this website is medical advice — if you
+          have a skin condition, allergy or medical concern, please consult a
+          qualified professional before use.
+        </p>
+        <p>
+          To the extent permitted by applicable law, our liability for any
+          claim relating to an order is limited to the amount you paid for
+          that order, and we are not liable for indirect or consequential
+          loss. This does not exclude or limit any right you have under
+          Indian consumer protection law that cannot lawfully be excluded.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Governing law and jurisdiction">
+        <p>
+          These terms are governed by the laws of India. Any dispute relating
+          to them or to an order is subject to the exclusive jurisdiction of
+          the courts at Chennai, Tamil Nadu.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Grievance redressal">
+        <p>
+          If you have a complaint about an order or about this website that
+          our regular{' '}
+          <Link href="/contact" className="text-green-800 hover:underline">
+            contact page
+          </Link>{' '}
+          has not resolved, you can escalate it directly
+          {contactEmail ? (
+            <>
+              {' '}
+              by email at{' '}
+              <a href={`mailto:${contactEmail}`} className="text-green-800 hover:underline">
+                {contactEmail}
+              </a>
+            </>
+          ) : null}
+          {whatsapp ? (
+            <>
+              {contactEmail ? ' or' : ' by'} WhatsApp at{' '}
+              <a
+                href={whatsapp}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-green-800 hover:underline"
+              >
+                {whatsappLabel}
+              </a>
+            </>
+          ) : null}
+          . We aim to acknowledge grievances promptly and resolve them within
+          a reasonable time.
+        </p>
       </LegalSection>
 
       <LegalSection title="Contact">
