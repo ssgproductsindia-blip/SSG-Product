@@ -188,9 +188,26 @@ is ever reported as paid without a server-verified signature.
    `https://yourdomain.com/api/razorpay/webhook`, subscribe to
    `payment.captured` and `payment.failed`, then copy the webhook secret it
    generates into `RAZORPAY_WEBHOOK_SECRET` in Vercel and redeploy.
-5. When ready for real payments, switch the dashboard out of Test Mode,
-   generate live keys, and replace all three values (Key ID in both places)
-   with the live ones. Test-mode and live-mode keys cannot be mixed.
+5. When ready for real payments (i.e. once Razorpay has approved the
+   account): generate live keys — dashboard → toggle out of Test Mode →
+   **Settings → API Keys → Generate Live Key** — and set them as
+   **Vercel's production environment variables, not `.env.local`.**
+   Local dev is where testing and experimentation happens; live keys
+   are real money and do not belong sitting in a sandbox alongside them.
+   Test-mode and live-mode keys cannot be mixed — this project's local
+   `.env.local` should stay on test-mode keys indefinitely, even after
+   the live site is charging real customers.
+
+   Verifying live mode is also a different exercise from verifying test
+   mode. In test mode it is safe to fabricate a valid payment signature
+   with the account's own key secret to prove the verification code
+   works, because nothing real is on the other end of it. Doing that
+   against a live account would create a real "paid" order in your
+   actual merchant records for a payment that never happened — so the
+   only honest way to confirm live mode works is a real, deliberate,
+   small transaction with a real card, placed by a human who intends to
+   pay it (and can request a refund from the Razorpay dashboard
+   afterward if it was purely a test).
 
 ---
 
