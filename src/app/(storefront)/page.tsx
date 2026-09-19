@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { Leaf, Sparkles, Sprout } from 'lucide-react';
 
@@ -84,36 +85,51 @@ export default async function HomePage() {
           className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,var(--color-green-100),transparent_70%)]"
         />
 
-        <div className="mx-auto max-w-6xl px-4 pb-16 pt-12 sm:px-6 sm:pb-24 sm:pt-20">
-          <Reveal>
-            <p className="inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-4 py-1.5 text-xs font-semibold tracking-wide text-green-800 uppercase">
-              <Leaf className="size-3.5" aria-hidden />
-              {BRAND.naturalBadge}
-            </p>
-          </Reveal>
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 pb-16 pt-12 sm:px-6 sm:pb-24 sm:pt-20 lg:grid-cols-2 lg:items-center lg:gap-16">
+          <div>
+            <Reveal>
+              <p className="inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-4 py-1.5 text-xs font-semibold tracking-wide text-green-800 uppercase">
+                <Leaf className="size-3.5" aria-hidden />
+                {BRAND.naturalBadge}
+              </p>
+            </Reveal>
 
-          {/* The single <h1> for this page. */}
-          <Reveal delay={60}>
-            <h1 className="mt-6 max-w-4xl font-display text-4xl leading-[1.08] font-semibold tracking-tight text-earth-900 text-balance sm:text-6xl lg:text-7xl">
-              Homemade herbal hair care, made the traditional way
-            </h1>
-          </Reveal>
+            {/* The single <h1> for this page. */}
+            <Reveal delay={60}>
+              <h1 className="mt-6 max-w-4xl font-display text-4xl leading-[1.08] font-semibold tracking-tight text-earth-900 text-balance sm:text-6xl lg:text-7xl">
+                Homemade herbal hair care, made the traditional way
+              </h1>
+            </Reveal>
 
-          <Reveal delay={120}>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-stone-600 text-pretty">
-              {BRAND.tagline}. Blended from herbs, seeds, flowers and roots —
-              nothing more.
-            </p>
-          </Reveal>
+            <Reveal delay={120}>
+              <p className="mt-6 max-w-xl text-lg leading-relaxed text-stone-600 text-pretty">
+                {BRAND.tagline}. Blended from herbs, seeds, flowers and roots —
+                nothing more.
+              </p>
+            </Reveal>
 
-          <Reveal delay={180}>
-            <div className="mt-9 flex flex-wrap gap-3">
-              <Button asChild size="lg">
-                <Link href="/products">Shop now</Link>
-              </Button>
-              <Button asChild size="lg" variant="outline">
-                <Link href="#ingredients">See what&rsquo;s inside</Link>
-              </Button>
+            <Reveal delay={180}>
+              <div className="mt-9 flex flex-wrap gap-3">
+                <Button asChild size="lg">
+                  <Link href="/products">Shop now</Link>
+                </Button>
+                <Button asChild size="lg" variant="outline">
+                  <Link href="#ingredients">See what&rsquo;s inside</Link>
+                </Button>
+              </div>
+            </Reveal>
+          </div>
+
+          <Reveal delay={100}>
+            <div className="relative mx-auto aspect-[5/6] w-full max-w-md overflow-hidden rounded-3xl border border-line shadow-xl shadow-earth-900/10">
+              <Image
+                src="/hero/homepage-hero.webp"
+                alt="SSG Herbal Shikakai Powder and Homemade Herbal Hair Oil, styled with shikakai pods, amla, hibiscus and curry leaves"
+                fill
+                priority
+                sizes="(min-width: 1024px) 40vw, 90vw"
+                className="object-cover"
+              />
             </div>
           </Reveal>
         </div>
