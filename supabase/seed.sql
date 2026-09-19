@@ -213,3 +213,195 @@ from products p, (values
 where pv.product_id = p.id
   and p.slug = 'herbal-hair-oil'
   and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 3 — SSG Hibiscus Hair Oil
+-- ---------------------------------------------------------------------------
+-- Added to the storefront after this file was first written, and only ever
+-- entered through the admin panel — this file was never updated to match,
+-- so a from-scratch database built from seed.sql alone was missing this
+-- product entirely until now. Transcribed here from the live database, not
+-- from the packaging directly, so no ingredients/specifications are set —
+-- fill those in via the admin panel from the actual label if they matter.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Hibiscus Hair Oil',
+  'hibiscus-hair-oil',
+  'Homemade Hibiscus Hair Oil · For All Hair Types · Grow Your Hair Naturally',
+  array[]::text[],
+  array[]::text[],
+  '{}'::jsonb,
+  true,
+  true,
+  3
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   100ml  MRP ₹390  ->  ₹239   (39% off)
+--   200ml  MRP ₹680  ->  ₹379   (44% off)
+
+with p as (select id from products where slug = 'hibiscus-hair-oil')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('100ml', 100::numeric, 'ml', 39000, 23900, 1),
+  ('200ml', 200::numeric, 'ml', 68000, 37900, 2)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('100ml', 39000, 23900),
+  ('200ml', 68000, 37900)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'hibiscus-hair-oil'
+  and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 4 — SSG Herbal Baby Bath Powder
+-- ---------------------------------------------------------------------------
+-- Same history as Product 3 above: added through the admin panel after this
+-- file was written, transcribed here from the live database.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Herbal Baby Bath Powder',
+  'herbal-baby-bath-powder',
+  '100% Natural · Homemade Ubtan Powder with 7 Herbs · For ages 0 to 8 years',
+  array[]::text[],
+  array['100% Natural', 'Homemade Powder'],
+  '{}'::jsonb,
+  true,
+  true,
+  4
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   250g  MRP ₹375   ->  ₹276   (26% off)
+--   500g  MRP ₹750   ->  ₹479   (36% off)
+--   1 KG  MRP ₹1200  ->  ₹796   (34% off)
+
+with p as (select id from products where slug = 'herbal-baby-bath-powder')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('250g', 250::numeric, 'g',  37500, 27600, 1),
+  ('500g', 500::numeric, 'g',  75000, 47900, 2),
+  ('1 KG',   1::numeric, 'kg', 120000, 79600, 3)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('250g', 37500, 27600),
+  ('500g', 75000, 47900),
+  ('1 KG', 120000, 79600)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'herbal-baby-bath-powder'
+  and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 5 — SSG Herbal Adult Bath Powder
+-- ---------------------------------------------------------------------------
+-- Same history as Products 3 and 4 above. Ingredients here ARE set — they
+-- were already recorded on the live database, unlike the two products above.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Herbal Adult Bath Powder',
+  'herbal-adult-bath-powder',
+  '100% Natural · Homemade Herbal Bath Powder',
+  array[
+    'Avarampoo', 'Hibiscus Leaves', 'Hibiscus Flower', 'Marikolundu',
+    'Paneer Rose', 'Karisoga Arisi', 'Green Gram', 'Vetiver', 'Lemon',
+    'Korakelangu', 'Vasambu', 'Poolankelangu', 'Magilambu', 'Dried Dhal',
+    'Vendayam', 'Soap nuts'
+  ],
+  array['100% Natural', 'Homemade Powder'],
+  '{}'::jsonb,
+  true,
+  true,
+  5
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   250g  MRP ₹470   ->  ₹289   (39% off)
+--   500g  MRP ₹800   ->  ₹540   (33% off)
+--   1 KG  MRP ₹1300  ->  ₹874   (33% off)
+
+with p as (select id from products where slug = 'herbal-adult-bath-powder')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('250g', 250::numeric, 'g',  47000, 28900, 1),
+  ('500g', 500::numeric, 'g',  80000, 54000, 2),
+  ('1 KG',   1::numeric, 'kg', 130000, 87400, 3)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('250g', 47000, 28900),
+  ('500g', 80000, 54000),
+  ('1 KG', 130000, 87400)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'herbal-adult-bath-powder'
+  and pv.variant_name = v.variant_name;

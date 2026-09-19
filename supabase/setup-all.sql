@@ -8,7 +8,6 @@
 -- =============================================================
 
 
-
 -- =============================================================
 -- SOURCE: supabase/migrations/0001_schema.sql
 -- =============================================================
@@ -1448,6 +1447,613 @@ alter table products add constraint products_slug_reserved check (
 
 
 -- =============================================================
+-- SOURCE: supabase/migrations/0006_razorpay.sql
+-- =============================================================
+
+-- ============================================================================
+-- SSG Products — Razorpay payment fields
+-- ----------------------------------------------------------------------------
+-- Adds the one column create_order was missing to record a payment gateway
+-- order id, and extends create_order itself so it can be called with real
+-- payment status once a payment has been verified.
+--
+-- The architecture this supports (see src/server/actions/checkout-actions.ts
+-- and src/lib/payments/razorpay.ts):
+--
+--   1. Cart is priced server-side (unchanged, pre-existing).
+--   2. A Razorpay order is created for that exact server-computed total.
+--   3. The customer pays in the Razorpay Checkout widget.
+--   4. The signature Razorpay returns is verified server-side.
+--   5. ONLY on a verified signature does this database ever hear about the
+--      order — create_order is called with payment_status='paid' already
+--      set, in the same transaction that writes everything else.
+--
+-- This means an abandoned or failed Razorpay checkout never creates an SSG
+-- order at all: no unpaid clutter, no stock touched, nothing to reconcile.
+-- Guest checkout with payments unconfigured is completely unaffected — every
+-- new parameter below defaults to exactly what the old 5-arg call already
+-- produced.
+-- ============================================================================
+
+alter table orders add column razorpay_order_id text;
+
+-- Different call sites need to find an order by whichever Razorpay id they
+-- have on hand — the checkout flow has the razorpay order id before it has a
+-- payment id, the webhook usually has both.
+create index orders_razorpay_order_idx on orders (razorpay_order_id) where razorpay_order_id is not null;
+
+-- See the note in 0005_customer_accounts.sql: CREATE OR REPLACE cannot change
+-- a function's parameter list, it creates a second overload and leaves the
+-- old one stranded. Drop the 5-arg version from 0005 explicitly first.
+drop function if exists create_order(jsonb, jsonb, jsonb, text, uuid);
+
+create or replace function create_order(
+  p_customer          jsonb,
+  p_shipping          jsonb,
+  p_items             jsonb,
+  p_notes             text default null,
+  p_auth_user_id      uuid default null,
+  p_payment_status    payment_status default 'pending',
+  p_payment_provider  text default null,
+  p_payment_reference text default null,
+  p_razorpay_order_id text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  v_customer_id uuid;
+  v_order_id    uuid;
+  v_order_number text;
+  v_item        jsonb;
+  v_variant_id  uuid;
+  v_qty         integer;
+  v_variant     record;
+  v_subtotal    integer := 0;
+  v_discount    integer := 0;
+  v_shipping    integer := 0;
+  v_flat        integer;
+  v_threshold   integer;
+  v_line_total  integer;
+begin
+  if p_items is null or jsonb_array_length(p_items) = 0 then
+    raise exception 'EMPTY_CART' using errcode = 'P0001';
+  end if;
+
+  if jsonb_array_length(p_items) > 50 then
+    raise exception 'TOO_MANY_ITEMS' using errcode = 'P0001';
+  end if;
+
+  insert into customers (email, name, phone)
+  values (
+    lower(trim(p_customer ->> 'email')),
+    trim(p_customer ->> 'name'),
+    nullif(trim(coalesce(p_customer ->> 'phone', '')), '')
+  )
+  on conflict (email) do update
+    set name  = excluded.name,
+        phone = coalesce(excluded.phone, customers.phone)
+  returning id into v_customer_id;
+
+  insert into orders (
+    customer_id, subtotal_paise, total_paise, notes, auth_user_id,
+    payment_status, payment_provider, payment_reference, razorpay_order_id
+  )
+  values (
+    v_customer_id, 0, 0, nullif(trim(coalesce(p_notes, '')), ''), p_auth_user_id,
+    p_payment_status, p_payment_provider, p_payment_reference, p_razorpay_order_id
+  )
+  returning id, order_number into v_order_id, v_order_number;
+
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    v_variant_id := (v_item ->> 'variant_id')::uuid;
+    v_qty        := (v_item ->> 'quantity')::integer;
+
+    if v_qty is null or v_qty < 1 or v_qty > 99 then
+      raise exception 'INVALID_QUANTITY' using errcode = 'P0001';
+    end if;
+
+    select pv.id, pv.variant_name, pv.mrp_paise, pv.selling_price_paise,
+           pv.sku, pv.stock, pv.is_active, pv.product_id,
+           p.name as product_name, p.is_active as product_active
+      into v_variant
+      from product_variants pv
+      join products p on p.id = pv.product_id
+     where pv.id = v_variant_id
+     for update of pv;
+
+    if not found then
+      raise exception 'VARIANT_NOT_FOUND:%', v_variant_id using errcode = 'P0001';
+    end if;
+
+    if not v_variant.is_active or not v_variant.product_active then
+      raise exception 'VARIANT_UNAVAILABLE:%', v_variant.product_name || ' (' || v_variant.variant_name || ')'
+        using errcode = 'P0001';
+    end if;
+
+    if v_variant.stock is not null then
+      if v_variant.stock < v_qty then
+        raise exception 'INSUFFICIENT_STOCK:%', v_variant.product_name || ' (' || v_variant.variant_name || ')'
+          using errcode = 'P0001';
+      end if;
+
+      update product_variants
+         set stock = stock - v_qty
+       where id = v_variant_id;
+    end if;
+
+    v_line_total := v_variant.selling_price_paise * v_qty;
+    v_subtotal   := v_subtotal + v_line_total;
+    v_discount   := v_discount + (v_variant.mrp_paise - v_variant.selling_price_paise) * v_qty;
+
+    insert into order_items (
+      order_id, product_id, variant_id,
+      product_name_snapshot, variant_name_snapshot, sku_snapshot,
+      mrp_paise_snapshot, selling_price_paise_snapshot,
+      quantity, subtotal_paise
+    )
+    values (
+      v_order_id, v_variant.product_id, v_variant_id,
+      v_variant.product_name, v_variant.variant_name, v_variant.sku,
+      v_variant.mrp_paise, v_variant.selling_price_paise,
+      v_qty, v_line_total
+    );
+  end loop;
+
+  select shipping_flat_paise, free_shipping_threshold_paise
+    into v_flat, v_threshold
+    from store_settings where id = true;
+
+  if v_flat is not null then
+    if v_threshold is not null and v_subtotal >= v_threshold then
+      v_shipping := 0;
+    else
+      v_shipping := v_flat;
+    end if;
+  end if;
+
+  update orders
+     set subtotal_paise = v_subtotal,
+         discount_paise = v_discount,
+         shipping_paise = v_shipping,
+         total_paise    = v_subtotal + v_shipping
+   where id = v_order_id;
+
+  insert into shipping_addresses (
+    order_id, name, phone, address, city, state, postal_code, country
+  )
+  values (
+    v_order_id,
+    trim(p_customer ->> 'name'),
+    trim(coalesce(p_customer ->> 'phone', '')),
+    trim(p_shipping ->> 'address'),
+    trim(p_shipping ->> 'city'),
+    trim(p_shipping ->> 'state'),
+    trim(p_shipping ->> 'postal_code'),
+    coalesce(nullif(trim(coalesce(p_shipping ->> 'country', '')), ''), 'India')
+  );
+
+  return jsonb_build_object(
+    'order_id',       v_order_id,
+    'order_number',   v_order_number,
+    'subtotal_paise', v_subtotal,
+    'discount_paise', v_discount,
+    'shipping_paise', v_shipping,
+    'total_paise',    v_subtotal + v_shipping
+  );
+end;
+$fn$;
+
+-- NOTE: `revoke ... from anon, authenticated` (what 0004 and 0005 both wrote
+-- here) is a no-op against a PUBLIC grant — see 0007_fix_function_grants.sql
+-- for the full explanation. Revoking from PUBLIC directly and re-granting to
+-- service_role only is what actually restricts this to server-only callers.
+revoke execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) from public;
+grant execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) to service_role;
+
+
+-- =============================================================
+-- SOURCE: supabase/migrations/0007_fix_function_grants.sql
+-- =============================================================
+
+-- ============================================================================
+-- Fix: create_order and next_order_number were reachable by anon
+-- ----------------------------------------------------------------------------
+-- Both were meant to be server-only, callable only through the service-role
+-- client (see 0004_create_order.sql: "Server-side only. The storefront
+-- reaches this through a Server Action using the secret key, never directly
+-- from the browser.").
+--
+-- That intent did not actually take effect. Postgres grants EXECUTE to PUBLIC
+-- automatically when a function is created, and `REVOKE ... FROM anon,
+-- authenticated` does not remove a privilege a role holds via PUBLIC — PUBLIC
+-- is a pseudo-grantee, not a role anon/authenticated are members of, so
+-- revoking from the named roles left the PUBLIC grant untouched.
+--
+-- Supabase's own security advisor caught this: anon could call
+-- /rest/v1/rpc/create_order directly. create_order re-reads every price
+-- itself, so this was not a price-tampering hole, but it did mean the checkout
+-- Server Action's own validation and rate limiting could be skipped entirely
+-- by hitting PostgREST directly, and next_order_number could be called to
+-- churn through order numbers for no reason.
+--
+-- The fix: revoke from PUBLIC (which removes it for every role, including
+-- service_role), then grant back explicitly to service_role only.
+--
+-- lookup_order and is_admin are unaffected — both are intentionally
+-- public-callable and already have direct grants; leaving them via PUBLIC
+-- changes nothing about who can call them.
+--
+-- create_order's signature below is the 9-parameter version introduced by
+-- 0006_razorpay.sql, not the original 4-parameter one from 0004 — by the
+-- time this migration runs (after 0005 and 0006 have already dropped and
+-- recreated the function twice), the 4-parameter overload no longer exists.
+-- Applying these migrations in order against a fresh database, rather than
+-- the incremental order they were originally written and applied in, is what
+-- surfaces this — worth remembering for any future from-scratch replay.
+-- ============================================================================
+
+revoke execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) from public;
+grant  execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) to service_role;
+
+revoke execute on function next_order_number() from public;
+grant  execute on function next_order_number() to service_role;
+
+
+-- =============================================================
+-- SOURCE: supabase/migrations/0008_fix_default_privilege_grants.sql
+-- =============================================================
+
+-- ============================================================================
+-- Fix: default privileges grant EXECUTE directly to anon/authenticated
+-- ----------------------------------------------------------------------------
+-- 0007 revoked EXECUTE from PUBLIC and re-granted to service_role only,
+-- believing that closed the hole. It did not, and the reason is worth
+-- recording precisely because it will bite again on every future function
+-- unless it is understood:
+--
+--   select pg_get_userbyid(defaclrole), defaclacl
+--   from pg_default_acl where defaclnamespace = 'public'::regnamespace;
+--
+-- returns, among others:
+--   postgres=X/postgres, anon=X/postgres, authenticated=X/postgres, ...
+--
+-- This project has an ALTER DEFAULT PRIVILEGES rule (set up by Supabase's own
+-- project bootstrapping, not by anything in this repo) that grants EXECUTE
+-- directly to anon and authenticated on every NEW function created by the
+-- postgres/supabase_admin role in the public schema. That grant is recorded
+-- against the role by name, not against PUBLIC — so "revoke ... from public"
+-- does nothing to it, and every create_order revision since 0005 has been
+-- silently exposed to anon again the moment it was (re)created, regardless of
+-- the revoke statement written in the same migration.
+--
+-- The practical rule going forward: any server-only SECURITY DEFINER function
+-- must explicitly revoke from anon AND authenticated by name (not only from
+-- PUBLIC) in the same migration that creates or replaces it.
+--
+-- handle_new_user() is included here too — it is a trigger function invoked
+-- by Postgres itself on auth.users insert, never called directly by a client,
+-- so it needs no role able to execute it via RPC at all.
+-- ============================================================================
+
+revoke execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) from anon, authenticated;
+
+revoke execute on function next_order_number() from anon, authenticated;
+
+-- handle_new_user needs both revokes: it still carried a plain PUBLIC grant
+-- (the ordinary CREATE FUNCTION default, same class of bug as 0007) on top of
+-- the default-privilege direct grant to anon/authenticated. Revoking only one
+-- of the two left it reachable via the other — confirmed live with
+-- has_function_privilege() before writing this. It is invoked solely by the
+-- trigger on auth.users insert, so it correctly ends up executable by no
+-- client role at all, not even service_role.
+revoke execute on function handle_new_user() from public, anon, authenticated, service_role;
+
+
+-- =============================================================
+-- SOURCE: supabase/migrations/0009_cancel_order.sql
+-- =============================================================
+
+-- ============================================================================
+-- cancel_order — the transactional order-cancellation path
+-- ----------------------------------------------------------------------------
+-- Cancelling touches two things that must move together: the order's status
+-- and the stock create_order previously decremented. Done as separate calls
+-- from application code (read order_items, then N update statements, then
+-- update the order), a failure partway through leaves stock restored for some
+-- items but not others, with no way to tell from the order row alone that it
+-- happened. One function, one transaction: it either all happens or none of
+-- it does — the same reasoning as create_order itself.
+--
+-- Idempotent: cancelling an already-cancelled order is a no-op, not a second
+-- restock. Untracked variants (stock is null) are left untracked, matching
+-- how create_order treats them going the other direction.
+--
+-- Deliberately NOT handled here: refunding a paid order. This function only
+-- ever touches `orders.status` and `product_variants.stock`. Admin UI is
+-- responsible for telling the owner to refund a paid order manually in the
+-- Razorpay dashboard — automating that is a real feature this schema does not
+-- yet support and should not quietly half-implement.
+-- ============================================================================
+
+create or replace function cancel_order(p_order_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  v_status       order_status;
+  v_order_number text;
+  v_item         record;
+begin
+  select status, order_number into v_status, v_order_number
+    from orders
+   where id = p_order_id
+     for update;
+
+  if not found then
+    raise exception 'ORDER_NOT_FOUND' using errcode = 'P0001';
+  end if;
+
+  if v_status = 'cancelled' then
+    return jsonb_build_object(
+      'order_id', p_order_id, 'order_number', v_order_number,
+      'status', 'cancelled', 'already_cancelled', true
+    );
+  end if;
+
+  -- A plain `stock = stock + quantity` is race-safe on its own — the UPDATE
+  -- statement takes the row lock implicitly — because restocking never
+  -- branches on the current value the way create_order's decrement does
+  -- (which must reject when stock is insufficient). There is nothing to
+  -- reject here, so no separate locking SELECT is needed.
+  for v_item in
+    select oi.variant_id, oi.quantity
+      from order_items oi
+     where oi.order_id = p_order_id and oi.variant_id is not null
+  loop
+    update product_variants
+       set stock = stock + v_item.quantity
+     where id = v_item.variant_id
+       and stock is not null;
+  end loop;
+
+  update orders set status = 'cancelled' where id = p_order_id;
+
+  return jsonb_build_object(
+    'order_id', p_order_id, 'order_number', v_order_number,
+    'status', 'cancelled', 'already_cancelled', false
+  );
+end;
+$fn$;
+
+-- Server-only, same as create_order — and the same three-way revoke, learned
+-- the hard way in 0007/0008: PUBLIC and the anon/authenticated default
+-- privileges are separate grants, and both must be revoked explicitly.
+revoke execute on function cancel_order(uuid) from public, anon, authenticated;
+grant  execute on function cancel_order(uuid) to service_role;
+
+
+-- =============================================================
+-- SOURCE: supabase/migrations/0010_tiered_shipping.sql
+-- =============================================================
+
+-- ============================================================================
+-- Tiered shipping — Tamil Nadu vs. rest of India
+-- ----------------------------------------------------------------------------
+-- SSG's real policy is two rates, not one: ₹50 within Tamil Nadu, ₹100
+-- everywhere else in India. The schema so far only had a single
+-- `shipping_flat_paise`, which cannot express that — setting it to either
+-- number would either overcharge Tamil Nadu customers or undercharge
+-- everyone else.
+--
+-- `shipping_flat_paise` keeps its name and becomes the DEFAULT / rest-of-India
+-- rate. `shipping_tamil_nadu_paise` is the override for Tamil Nadu, and is
+-- nullable — a store that only ever fills in shipping_flat_paise keeps working
+-- exactly as a single flat rate, with tiering only switching on once both
+-- values are set.
+--
+-- State matching strips everything but letters and lowercases before
+-- comparing, so "Tamil Nadu", "TamilNadu", "tamil  nadu" and "TN" all match —
+-- the field is free text a customer typed, not a constrained dropdown.
+-- ============================================================================
+
+alter table store_settings add column shipping_tamil_nadu_paise integer;
+
+create or replace function create_order(
+  p_customer          jsonb,
+  p_shipping          jsonb,
+  p_items             jsonb,
+  p_notes             text default null,
+  p_auth_user_id      uuid default null,
+  p_payment_status    payment_status default 'pending',
+  p_payment_provider  text default null,
+  p_payment_reference text default null,
+  p_razorpay_order_id text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  v_customer_id uuid;
+  v_order_id    uuid;
+  v_order_number text;
+  v_item        jsonb;
+  v_variant_id  uuid;
+  v_qty         integer;
+  v_variant     record;
+  v_subtotal    integer := 0;
+  v_discount    integer := 0;
+  v_shipping    integer := 0;
+  v_flat        integer;
+  v_tn_rate     integer;
+  v_rate        integer;
+  v_threshold   integer;
+  v_line_total  integer;
+begin
+  if p_items is null or jsonb_array_length(p_items) = 0 then
+    raise exception 'EMPTY_CART' using errcode = 'P0001';
+  end if;
+
+  if jsonb_array_length(p_items) > 50 then
+    raise exception 'TOO_MANY_ITEMS' using errcode = 'P0001';
+  end if;
+
+  insert into customers (email, name, phone)
+  values (
+    lower(trim(p_customer ->> 'email')),
+    trim(p_customer ->> 'name'),
+    nullif(trim(coalesce(p_customer ->> 'phone', '')), '')
+  )
+  on conflict (email) do update
+    set name  = excluded.name,
+        phone = coalesce(excluded.phone, customers.phone)
+  returning id into v_customer_id;
+
+  insert into orders (
+    customer_id, subtotal_paise, total_paise, notes, auth_user_id,
+    payment_status, payment_provider, payment_reference, razorpay_order_id
+  )
+  values (
+    v_customer_id, 0, 0, nullif(trim(coalesce(p_notes, '')), ''), p_auth_user_id,
+    p_payment_status, p_payment_provider, p_payment_reference, p_razorpay_order_id
+  )
+  returning id, order_number into v_order_id, v_order_number;
+
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    v_variant_id := (v_item ->> 'variant_id')::uuid;
+    v_qty        := (v_item ->> 'quantity')::integer;
+
+    if v_qty is null or v_qty < 1 or v_qty > 99 then
+      raise exception 'INVALID_QUANTITY' using errcode = 'P0001';
+    end if;
+
+    select pv.id, pv.variant_name, pv.mrp_paise, pv.selling_price_paise,
+           pv.sku, pv.stock, pv.is_active, pv.product_id,
+           p.name as product_name, p.is_active as product_active
+      into v_variant
+      from product_variants pv
+      join products p on p.id = pv.product_id
+     where pv.id = v_variant_id
+     for update of pv;
+
+    if not found then
+      raise exception 'VARIANT_NOT_FOUND:%', v_variant_id using errcode = 'P0001';
+    end if;
+
+    if not v_variant.is_active or not v_variant.product_active then
+      raise exception 'VARIANT_UNAVAILABLE:%', v_variant.product_name || ' (' || v_variant.variant_name || ')'
+        using errcode = 'P0001';
+    end if;
+
+    if v_variant.stock is not null then
+      if v_variant.stock < v_qty then
+        raise exception 'INSUFFICIENT_STOCK:%', v_variant.product_name || ' (' || v_variant.variant_name || ')'
+          using errcode = 'P0001';
+      end if;
+
+      update product_variants
+         set stock = stock - v_qty
+       where id = v_variant_id;
+    end if;
+
+    v_line_total := v_variant.selling_price_paise * v_qty;
+    v_subtotal   := v_subtotal + v_line_total;
+    v_discount   := v_discount + (v_variant.mrp_paise - v_variant.selling_price_paise) * v_qty;
+
+    insert into order_items (
+      order_id, product_id, variant_id,
+      product_name_snapshot, variant_name_snapshot, sku_snapshot,
+      mrp_paise_snapshot, selling_price_paise_snapshot,
+      quantity, subtotal_paise
+    )
+    values (
+      v_order_id, v_variant.product_id, v_variant_id,
+      v_variant.product_name, v_variant.variant_name, v_variant.sku,
+      v_variant.mrp_paise, v_variant.selling_price_paise,
+      v_qty, v_line_total
+    );
+  end loop;
+
+  select shipping_flat_paise, shipping_tamil_nadu_paise, free_shipping_threshold_paise
+    into v_flat, v_tn_rate, v_threshold
+    from store_settings where id = true;
+
+  if v_flat is not null then
+    -- Tamil Nadu gets its own rate only when one is actually configured;
+    -- otherwise everyone pays the single flat rate, unchanged from before.
+    if v_tn_rate is not null
+       and lower(regexp_replace(coalesce(p_shipping ->> 'state', ''), '[^a-zA-Z]', '', 'g'))
+           in ('tamilnadu', 'tn')
+    then
+      v_rate := v_tn_rate;
+    else
+      v_rate := v_flat;
+    end if;
+
+    if v_threshold is not null and v_subtotal >= v_threshold then
+      v_shipping := 0;
+    else
+      v_shipping := v_rate;
+    end if;
+  end if;
+
+  update orders
+     set subtotal_paise = v_subtotal,
+         discount_paise = v_discount,
+         shipping_paise = v_shipping,
+         total_paise    = v_subtotal + v_shipping
+   where id = v_order_id;
+
+  insert into shipping_addresses (
+    order_id, name, phone, address, city, state, postal_code, country
+  )
+  values (
+    v_order_id,
+    trim(p_customer ->> 'name'),
+    trim(coalesce(p_customer ->> 'phone', '')),
+    trim(p_shipping ->> 'address'),
+    trim(p_shipping ->> 'city'),
+    trim(p_shipping ->> 'state'),
+    trim(p_shipping ->> 'postal_code'),
+    coalesce(nullif(trim(coalesce(p_shipping ->> 'country', '')), ''), 'India')
+  );
+
+  return jsonb_build_object(
+    'order_id',       v_order_id,
+    'order_number',   v_order_number,
+    'subtotal_paise', v_subtotal,
+    'discount_paise', v_discount,
+    'shipping_paise', v_shipping,
+    'total_paise',    v_subtotal + v_shipping
+  );
+end;
+$fn$;
+
+-- CREATE OR REPLACE on the SAME parameter list preserves existing grants —
+-- unlike the parameter-adding migrations (0005, 0006), this does not need a
+-- drop-and-recreate, and does not reset create_order back to a public grant.
+-- Confirmed this holds with has_function_privilege() after applying.
+
+
+-- =============================================================
 -- SOURCE: supabase/seed.sql
 -- =============================================================
 
@@ -1665,4 +2271,196 @@ from products p, (values
 ) as v(variant_name, mrp, price)
 where pv.product_id = p.id
   and p.slug = 'herbal-hair-oil'
+  and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 3 — SSG Hibiscus Hair Oil
+-- ---------------------------------------------------------------------------
+-- Added to the storefront after this file was first written, and only ever
+-- entered through the admin panel — this file was never updated to match,
+-- so a from-scratch database built from seed.sql alone was missing this
+-- product entirely until now. Transcribed here from the live database, not
+-- from the packaging directly, so no ingredients/specifications are set —
+-- fill those in via the admin panel from the actual label if they matter.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Hibiscus Hair Oil',
+  'hibiscus-hair-oil',
+  'Homemade Hibiscus Hair Oil · For All Hair Types · Grow Your Hair Naturally',
+  array[]::text[],
+  array[]::text[],
+  '{}'::jsonb,
+  true,
+  true,
+  3
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   100ml  MRP ₹390  ->  ₹239   (39% off)
+--   200ml  MRP ₹680  ->  ₹379   (44% off)
+
+with p as (select id from products where slug = 'hibiscus-hair-oil')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('100ml', 100::numeric, 'ml', 39000, 23900, 1),
+  ('200ml', 200::numeric, 'ml', 68000, 37900, 2)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('100ml', 39000, 23900),
+  ('200ml', 68000, 37900)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'hibiscus-hair-oil'
+  and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 4 — SSG Herbal Baby Bath Powder
+-- ---------------------------------------------------------------------------
+-- Same history as Product 3 above: added through the admin panel after this
+-- file was written, transcribed here from the live database.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Herbal Baby Bath Powder',
+  'herbal-baby-bath-powder',
+  '100% Natural · Homemade Ubtan Powder with 7 Herbs · For ages 0 to 8 years',
+  array[]::text[],
+  array['100% Natural', 'Homemade Powder'],
+  '{}'::jsonb,
+  true,
+  true,
+  4
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   250g  MRP ₹375   ->  ₹276   (26% off)
+--   500g  MRP ₹750   ->  ₹479   (36% off)
+--   1 KG  MRP ₹1200  ->  ₹796   (34% off)
+
+with p as (select id from products where slug = 'herbal-baby-bath-powder')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('250g', 250::numeric, 'g',  37500, 27600, 1),
+  ('500g', 500::numeric, 'g',  75000, 47900, 2),
+  ('1 KG',   1::numeric, 'kg', 120000, 79600, 3)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('250g', 37500, 27600),
+  ('500g', 75000, 47900),
+  ('1 KG', 120000, 79600)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'herbal-baby-bath-powder'
+  and pv.variant_name = v.variant_name;
+
+-- ---------------------------------------------------------------------------
+-- Product 5 — SSG Herbal Adult Bath Powder
+-- ---------------------------------------------------------------------------
+-- Same history as Products 3 and 4 above. Ingredients here ARE set — they
+-- were already recorded on the live database, unlike the two products above.
+
+insert into products (
+  name, slug, short_description, ingredients, benefits, specifications,
+  is_active, is_featured, sort_order
+)
+values (
+  'SSG Herbal Adult Bath Powder',
+  'herbal-adult-bath-powder',
+  '100% Natural · Homemade Herbal Bath Powder',
+  array[
+    'Avarampoo', 'Hibiscus Leaves', 'Hibiscus Flower', 'Marikolundu',
+    'Paneer Rose', 'Karisoga Arisi', 'Green Gram', 'Vetiver', 'Lemon',
+    'Korakelangu', 'Vasambu', 'Poolankelangu', 'Magilambu', 'Dried Dhal',
+    'Vendayam', 'Soap nuts'
+  ],
+  array['100% Natural', 'Homemade Powder'],
+  '{}'::jsonb,
+  true,
+  true,
+  5
+)
+on conflict (slug) do update
+  set name              = excluded.name,
+      short_description = excluded.short_description,
+      ingredients       = excluded.ingredients,
+      benefits          = excluded.benefits,
+      specifications    = excluded.specifications,
+      is_active         = excluded.is_active,
+      is_featured       = excluded.is_featured,
+      sort_order        = excluded.sort_order;
+
+--   250g  MRP ₹470   ->  ₹289   (39% off)
+--   500g  MRP ₹800   ->  ₹540   (33% off)
+--   1 KG  MRP ₹1300  ->  ₹874   (33% off)
+
+with p as (select id from products where slug = 'herbal-adult-bath-powder')
+insert into product_variants (
+  product_id, variant_name, quantity_value, quantity_unit,
+  mrp_paise, selling_price_paise, sort_order
+)
+select p.id, v.variant_name, v.qty, v.unit, v.mrp, v.price, v.ord
+from p, (values
+  ('250g', 250::numeric, 'g',  47000, 28900, 1),
+  ('500g', 500::numeric, 'g',  80000, 54000, 2),
+  ('1 KG',   1::numeric, 'kg', 130000, 87400, 3)
+) as v(variant_name, qty, unit, mrp, price, ord)
+where not exists (
+  select 1 from product_variants pv
+  where pv.product_id = p.id and pv.variant_name = v.variant_name
+);
+
+update product_variants pv
+set mrp_paise = v.mrp, selling_price_paise = v.price
+from products p, (values
+  ('250g', 47000, 28900),
+  ('500g', 80000, 54000),
+  ('1 KG', 130000, 87400)
+) as v(variant_name, mrp, price)
+where pv.product_id = p.id
+  and p.slug = 'herbal-adult-bath-powder'
   and pv.variant_name = v.variant_name;

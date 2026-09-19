@@ -25,10 +25,22 @@
 -- lookup_order and is_admin are unaffected — both are intentionally
 -- public-callable and already have direct grants; leaving them via PUBLIC
 -- changes nothing about who can call them.
+--
+-- create_order's signature below is the 9-parameter version introduced by
+-- 0006_razorpay.sql, not the original 4-parameter one from 0004 — by the
+-- time this migration runs (after 0005 and 0006 have already dropped and
+-- recreated the function twice), the 4-parameter overload no longer exists.
+-- Applying these migrations in order against a fresh database, rather than
+-- the incremental order they were originally written and applied in, is what
+-- surfaces this — worth remembering for any future from-scratch replay.
 -- ============================================================================
 
-revoke execute on function create_order(jsonb, jsonb, jsonb, text) from public;
-grant  execute on function create_order(jsonb, jsonb, jsonb, text) to service_role;
+revoke execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) from public;
+grant  execute on function create_order(
+  jsonb, jsonb, jsonb, text, uuid, payment_status, text, text, text
+) to service_role;
 
 revoke execute on function next_order_number() from public;
 grant  execute on function next_order_number() to service_role;
