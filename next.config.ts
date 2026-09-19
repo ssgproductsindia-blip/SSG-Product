@@ -11,6 +11,17 @@ const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
   : undefined;
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Next's own Server Action body limit defaults to 1MB, well under the
+    // 8MB this app's own upload action already validates against
+    // (src/server/actions/product-actions.ts) and the 10MB Supabase Storage
+    // bucket limit (0003_storage.sql). Without raising it here, a request
+    // over 1MB is silently rejected before that validation ever runs.
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
+
   images: {
     remotePatterns: supabaseHost
       ? [

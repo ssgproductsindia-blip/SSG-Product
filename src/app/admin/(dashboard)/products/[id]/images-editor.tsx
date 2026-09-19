@@ -61,15 +61,26 @@ export function ImagesEditor({
     // decide whether it is the first (and therefore primary); running them
     // together would race and could set two primaries or none.
     let uploaded = 0;
-    for (const file of Array.from(files)) {
-      const formData = new FormData();
-      formData.append('file', file);
-      const result = await uploadProductImageAction(productId, formData);
-      if (!result.ok) {
-        setError(`${file.name}: ${result.error}`);
-        break;
+    try {
+      for (const file of Array.from(files)) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const result = await uploadProductImageAction(productId, formData);
+        if (!result.ok) {
+          setError(`${file.name}: ${result.error}`);
+          break;
+        }
+        uploaded += 1;
       }
-      uploaded += 1;
+    } catch {
+      // A Server Action can throw instead of returning ActionResult — a
+      // network drop, or a request rejected before the action's own code
+      // ever runs (e.g. exceeding Next's server action body size limit).
+      // Without this catch, `uploading` would stay true forever: the button
+      // would say "Uploading…" indefinitely with no way to tell what failed.
+      setError(
+        'Upload failed unexpectedly. If this image is several MB, try a smaller file.',
+      );
     }
 
     setUploading(false);
