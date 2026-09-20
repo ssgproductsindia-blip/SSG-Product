@@ -64,6 +64,13 @@ const serverSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  // WhatsApp (Meta Cloud API). WHATSAPP_VERIFY_TOKEN is a value chosen here,
+  // not issued by Meta — it must match exactly what is entered in the
+  // "Verify token" field when configuring the webhook on the Meta app
+  // dashboard, so the callback URL can prove to Meta it is the intended
+  // recipient during the one-time verification handshake.
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
 });
 
 let cachedServerEnv: z.infer<typeof serverSchema> | null = null;
@@ -82,6 +89,7 @@ export function serverEnv() {
       RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
       RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
       RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
+      WHATSAPP_VERIFY_TOKEN: process.env.WHATSAPP_VERIFY_TOKEN,
     });
   }
   return cachedServerEnv;
