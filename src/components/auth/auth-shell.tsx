@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { Leaf } from 'lucide-react';
 
@@ -29,6 +30,20 @@ export function AuthShell({
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="relative hidden overflow-hidden bg-green-800 lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <Image
+          src="/auth/auth-hero.webp"
+          alt=""
+          aria-hidden
+          fill
+          priority
+          sizes="50vw"
+          className="object-cover object-[30%_center]"
+        />
+        {/* Scrim: the photo alone doesn't give white text reliable contrast
+            everywhere (the wall in the top-right of the source photo is
+            light and sunlit), so this darkens the whole panel uniformly
+            rather than only at the corners text happens to sit in. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 bg-green-900/65" />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_20%_0%,rgba(255,255,255,0.08),transparent_60%)]"
