@@ -12,6 +12,7 @@ import {
 import { cartSchema, checkoutSchema } from '@/lib/validation';
 import { orderConfirmationEmail } from '@/lib/email/templates';
 import { sendOrderEmail } from '@/lib/email/send';
+import { sendWhatsAppOrderConfirmation } from '@/lib/whatsapp/send';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { priceCart } from '@/server/pricing';
@@ -181,7 +182,7 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     return { ok: false, error: 'Please check the highlighted fields.', fieldErrors };
   }
 
-  const { customer, shipping, items, notes, payment } = parsed.data;
+  const { customer, shipping, items, notes, payment, whatsappOptIn } = parsed.data;
   const paymentsOn = paymentsConfigured();
 
   // ---- Payment verification, when Razorpay is on -------------------------
@@ -384,6 +385,25 @@ export async function placeOrderAction(input: unknown): Promise<PlaceOrderResult
     // Swallowed on purpose — the order is already committed. The customer is
     // told on the confirmation screen that the email did not go out.
     emailSent = false;
+  }
+
+  // ---- WhatsApp confirmation ---------------------------------------------
+  // Only for customers who ticked the opt-in box. Independent of the email: a
+  // failure here is recorded in notification_logs by the sender and never
+  // reaches the customer or affects the order.
+  if (whatsappOptIn) {
+    try {
+      await sendWhatsAppOrderConfirmation({
+        orderId: result.order_id,
+        orderNumber: result.order_number,
+        phone: customer.phone,
+        customerName: customer.name,
+        totalPaise: result.total_paise,
+      });
+    } catch {
+      // The sender returns outcomes rather than throwing; this only guards
+      // against something unexpected escaping and taking the order down.
+    }
   }
 
   return {

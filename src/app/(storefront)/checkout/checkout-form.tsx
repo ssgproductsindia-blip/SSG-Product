@@ -145,6 +145,7 @@ export function CheckoutForm({
       },
       items: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
       notes: checkoutFields.notes || undefined,
+      whatsappOptIn: checkoutFields.whatsappOptIn === 'on',
       ...(payment ? { payment } : {}),
     });
 
@@ -180,7 +181,18 @@ export function CheckoutForm({
 
     const form = new FormData(event.currentTarget);
     const fields: Record<string, string> = {};
-    for (const key of ['name', 'email', 'phone', 'address', 'city', 'state', 'postalCode', 'country', 'notes']) {
+    for (const key of [
+      'name',
+      'email',
+      'phone',
+      'whatsappOptIn',
+      'address',
+      'city',
+      'state',
+      'postalCode',
+      'country',
+      'notes',
+    ]) {
       fields[key] = String(form.get(key) ?? '').trim();
     }
 
@@ -306,6 +318,21 @@ export function CheckoutForm({
               hint="10-digit Indian mobile."
               error={fieldErrors['customer.phone']}
             />
+            {/* Unticked by default on purpose: WhatsApp requires the customer to
+                have actively agreed before a business messages them. */}
+            <label className="flex items-start gap-3 text-sm text-stone-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                name="whatsappOptIn"
+                className="mt-0.5 size-4 shrink-0 accent-green-700"
+              />
+              <span>
+                Also send my order confirmation on WhatsApp to the mobile number above.
+                <span className="block text-xs text-ink-muted">
+                  Optional. We&rsquo;ll only message you about this order.
+                </span>
+              </span>
+            </label>
           </div>
         </fieldset>
 

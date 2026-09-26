@@ -105,6 +105,12 @@ export const checkoutSchema = z.object({
   notes: z.string().trim().max(500).optional(),
   /** Present only when payments are enabled and the customer already paid. */
   payment: paymentProofSchema.optional(),
+  /**
+   * Explicit opt-in to receive the order confirmation on WhatsApp. WhatsApp's
+   * policy requires the customer to have agreed before a business messages
+   * them, so absence means no — never a default of yes.
+   */
+  whatsappOptIn: z.boolean().optional(),
 });
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;

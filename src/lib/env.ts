@@ -71,6 +71,18 @@ const serverSchema = z.object({
   // dashboard, so the callback URL can prove to Meta it is the intended
   // recipient during the one-time verification handshake.
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+  // Sending: the token authorises the Cloud API call, the phone number id says
+  // which registered number sends. Template name/language must match an
+  // APPROVED template exactly; both default to the values this integration
+  // was built against.
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_TEMPLATE_NAME: z.string().optional(),
+  WHATSAPP_TEMPLATE_LANGUAGE: z.string().optional(),
+  // Set to "true" only if the approved template includes the dynamic
+  // "Track order" URL button; sending button parameters to a template that has
+  // no such button is rejected by the API.
+  WHATSAPP_TEMPLATE_TRACK_BUTTON: z.string().optional(),
 });
 
 let cachedServerEnv: z.infer<typeof serverSchema> | null = null;
@@ -90,6 +102,11 @@ export function serverEnv() {
       RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
       RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
       WHATSAPP_VERIFY_TOKEN: process.env.WHATSAPP_VERIFY_TOKEN,
+      WHATSAPP_ACCESS_TOKEN: process.env.WHATSAPP_ACCESS_TOKEN,
+      WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID,
+      WHATSAPP_TEMPLATE_NAME: process.env.WHATSAPP_TEMPLATE_NAME,
+      WHATSAPP_TEMPLATE_LANGUAGE: process.env.WHATSAPP_TEMPLATE_LANGUAGE,
+      WHATSAPP_TEMPLATE_TRACK_BUTTON: process.env.WHATSAPP_TEMPLATE_TRACK_BUTTON,
     });
   }
   return cachedServerEnv;
@@ -103,6 +120,11 @@ export function serverEnv() {
  * unconfigured gateway produces an order that is honestly marked unpaid,
  * rather than either one silently reporting success.
  */
+export function whatsappConfigured(): boolean {
+  const env = serverEnv();
+  return Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID);
+}
+
 export function emailConfigured(): boolean {
   const env = serverEnv();
   return Boolean(env.RESEND_API_KEY && env.ORDER_EMAIL_FROM);

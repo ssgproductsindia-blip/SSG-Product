@@ -25,7 +25,8 @@ export type PaymentStatus = 'pending' | 'paid' | 'failed' | 'refunded';
 export type NotificationType =
   | 'order_confirmation'
   | 'order_shipped'
-  | 'order_status_updated';
+  | 'order_status_updated'
+  | 'whatsapp_order_confirmation';
 
 export type NotificationStatus = 'sent' | 'failed';
 

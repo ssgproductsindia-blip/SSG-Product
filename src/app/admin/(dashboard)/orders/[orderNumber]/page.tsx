@@ -65,6 +65,7 @@ const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   order_confirmation: 'Order confirmation',
   order_shipped: 'Shipping notification',
   order_status_updated: 'Status update',
+  whatsapp_order_confirmation: 'WhatsApp order confirmation',
 };
 
 export default async function AdminOrderDetailPage({
