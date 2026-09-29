@@ -266,7 +266,7 @@ export function CheckoutForm({
       prefill: { name: fields.name, email: fields.email, contact: fields.phone },
       theme: { color: '#3d7a2f' },
       handler: (response) => {
-        setStatusMessage('Payment received — confirming your order…');
+        setStatusMessage('Confirming your order…');
         void completeOrder(fields, {
           razorpayOrderId: response.razorpay_order_id,
           razorpayPaymentId: response.razorpay_payment_id,
@@ -510,7 +510,15 @@ export function CheckoutForm({
             type="submit"
             size="lg"
             full
-            className="mt-6"
+            // The base "lg" size is a fixed-height, non-wrapping pill — fine
+            // for the short static labels below, but the in-progress status
+            // text ("Confirming your order…") is longer and was getting cut
+            // off inside a narrow checkout summary card (see the mobile
+            // layout) rather than wrapping. Overridden here, not on the
+            // shared Button component, since every other use of size="lg"
+            // elsewhere on the site is a short single-line label that never
+            // needed to wrap.
+            className="mt-6 h-auto min-h-13 whitespace-normal py-3 text-center leading-snug"
             disabled={submitting || (paymentsEnabled && !razorpayReady)}
           >
             {statusMessage
