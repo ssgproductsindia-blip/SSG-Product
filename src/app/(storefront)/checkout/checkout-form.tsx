@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { useCart } from '@/components/cart/cart-provider';
 import { Button } from '@/components/ui/button';
 import { formatPaise } from '@/lib/money';
+import { checkoutSchema } from '@/lib/validation';
 import { createPaymentOrderAction, placeOrderAction } from '@/server/actions/checkout-actions';
 import { Field, TextAreaField } from '@/components/forms/field';
 
@@ -194,6 +195,38 @@ export function CheckoutForm({
       'notes',
     ]) {
       fields[key] = String(form.get(key) ?? '').trim();
+    }
+
+    // Validate everything the customer typed BEFORE any money moves. The form
+    // has noValidate (see below) so the browser's own required-field checks
+    // never run, and createPaymentOrderAction below only prices the cart —
+    // it does not know or care whether an address was ever entered. Without
+    // this check, a customer could pay through Razorpay and only then learn,
+    // on the far side of a real charge, that their address was missing.
+    const precheck = checkoutSchema
+      .pick({ customer: true, shipping: true })
+      .safeParse({
+        customer: { name: fields.name, email: fields.email, phone: fields.phone },
+        shipping: {
+          address: fields.address,
+          city: fields.city,
+          state: fields.state,
+          postalCode: fields.postalCode,
+          country: fields.country || 'India',
+        },
+      });
+
+    if (!precheck.success) {
+      const errors: FieldErrors = {};
+      for (const issue of precheck.error.issues) {
+        const key = issue.path.join('.');
+        if (key && !errors[key]) errors[key] = issue.message;
+      }
+      setFieldErrors(errors);
+      setFormError('Please check the highlighted fields.');
+      setSubmitting(false);
+      document.getElementById('checkout-error')?.focus();
+      return;
     }
 
     if (!paymentsEnabled) {
